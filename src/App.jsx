@@ -31,7 +31,10 @@ import {
   Store,
   ShieldCheck,
   Database,
-  Cloud
+  Cloud,
+  Lock,
+  Mail,
+  EyeOff
 } from 'lucide-react';
 
 import { 
@@ -75,6 +78,20 @@ export default function App() {
   // Flash / Splash Loading Screen State
   const [appLoading, setAppLoading] = useState(true);
   const [loadingFadingOut, setLoadingFadingOut] = useState(false);
+
+  // Admin Authentication State (Username: hr@lordsandkings.co | Pwd: lak@2018)
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(() => {
+    try {
+      return sessionStorage.getItem('convenio_admin_auth') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [adminUsername, setAdminUsername] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
+  const [showAdminPassword, setShowAdminPassword] = useState(false);
+  const [adminAuthError, setAdminAuthError] = useState('');
+  const [isAdminLoggingIn, setIsAdminLoggingIn] = useState(false);
 
   // Master Branch & Employee Data
   const [branches, setBranches] = useState(getStoredBranches);
@@ -303,6 +320,45 @@ export default function App() {
 
   // Active branch in Admin Management
   const currentAdminBranch = branches.find(b => b.id === adminSelectedBranchId) || branches[0];
+
+  // ================= ADMIN AUTHENTICATION HANDLERS =================
+  const handleAdminLogin = (e) => {
+    e.preventDefault();
+    setAdminAuthError('');
+    setIsAdminLoggingIn(true);
+
+    const inputUser = adminUsername.trim().toLowerCase();
+    const inputPass = adminPassword;
+
+    setTimeout(() => {
+      if (inputUser === 'hr@lordsandkings.co' && inputPass === 'lak@2018') {
+        setIsAdminAuthenticated(true);
+        try {
+          sessionStorage.setItem('convenio_admin_auth', 'true');
+        } catch {
+          // ignore
+        }
+        setAdminPassword('');
+        setAdminAuthError('');
+      } else {
+        setAdminAuthError('Invalid username or password. Please verify your credentials.');
+      }
+      setIsAdminLoggingIn(false);
+    }, 350);
+  };
+
+  const handleAdminLogout = () => {
+    setIsAdminAuthenticated(false);
+    try {
+      sessionStorage.removeItem('convenio_admin_auth');
+    } catch {
+      // ignore
+    }
+    setAdminUsername('');
+    setAdminPassword('');
+    setAdminAuthError('');
+    navigateTo('attendance');
+  };
 
   // ================= BRANCH MANAGEMENT HANDLERS =================
   const handleAddBranch = (e) => {
@@ -776,14 +832,27 @@ export default function App() {
               <span>Admin Portal</span>
             </button>
           ) : (
-            <button 
-              id="nav-back-to-attendance-btn"
-              className="portal-back-btn"
-              onClick={() => navigateTo('attendance')}
-            >
-              <ArrowLeft size={16} />
-              <span>Back to Attendance</span>
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <button 
+                id="nav-back-to-attendance-btn"
+                className="portal-back-btn"
+                onClick={() => navigateTo('attendance')}
+              >
+                <ArrowLeft size={16} />
+                <span>Back to Attendance</span>
+              </button>
+              {isAdminAuthenticated && (
+                <button 
+                  id="admin-logout-btn"
+                  className="portal-logout-btn"
+                  onClick={handleAdminLogout}
+                  title="Sign out of Admin Portal"
+                >
+                  <LogOut size={15} />
+                  <span>Logout</span>
+                </button>
+              )}
+            </div>
           )}
         </div>
       </header>
@@ -895,14 +964,119 @@ export default function App() {
 
       {/* ================= 2. ADMIN PORTAL VIEW ================= */}
       {view === 'admin' && (
-        <main className="admin-container">
-          {/* Admin Header with Sub-tabs */}
-          <div className="admin-header-card">
-            <div className="admin-title-row">
-              <div>
-                <h1 className="admin-title">Admin Dashboard</h1>
-                <p className="admin-subtitle">Manage branch locations, staff members, and attendance records</p>
+        !isAdminAuthenticated ? (
+          <main className="main-content">
+            <div className="admin-login-card">
+              <div className="admin-login-header">
+                <div className="admin-login-badge-icon">
+                  <Lock size={26} />
+                </div>
+                <h1 className="admin-login-title">Admin Authentication</h1>
+                <p className="admin-login-subtitle">
+                  Restricted access. Please sign in with your HR management credentials.
+                </p>
               </div>
+
+              {adminAuthError && (
+                <div className="admin-login-error">
+                  <AlertCircle size={18} />
+                  <span>{adminAuthError}</span>
+                </div>
+              )}
+
+              <form className="admin-login-form" onSubmit={handleAdminLogin}>
+                <div className="admin-input-group">
+                  <label htmlFor="admin-username-input">Username / Email</label>
+                  <div className="admin-input-wrapper">
+                    <Mail size={18} className="admin-input-icon" />
+                    <input
+                      id="admin-username-input"
+                      type="email"
+                      required
+                      autoComplete="username"
+                      placeholder="hr@lordsandkings.co"
+                      value={adminUsername}
+                      onChange={(e) => {
+                        setAdminUsername(e.target.value);
+                        if (adminAuthError) setAdminAuthError('');
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div className="admin-input-group">
+                  <label htmlFor="admin-password-input">Password</label>
+                  <div className="admin-input-wrapper">
+                    <Lock size={18} className="admin-input-icon" />
+                    <input
+                      id="admin-password-input"
+                      type={showAdminPassword ? 'text' : 'password'}
+                      required
+                      autoComplete="current-password"
+                      placeholder="Enter admin password"
+                      value={adminPassword}
+                      onChange={(e) => {
+                        setAdminPassword(e.target.value);
+                        if (adminAuthError) setAdminAuthError('');
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="password-toggle-btn"
+                      onClick={() => setShowAdminPassword(!showAdminPassword)}
+                      tabIndex={-1}
+                      title={showAdminPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showAdminPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  id="admin-login-submit-btn"
+                  className="admin-login-submit-btn"
+                  disabled={isAdminLoggingIn}
+                >
+                  {isAdminLoggingIn ? (
+                    <>
+                      <Loader2 size={18} className="spinner" />
+                      <span>Verifying...</span>
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck size={18} />
+                      <span>Sign In to Admin Portal</span>
+                    </>
+                  )}
+                </button>
+              </form>
+
+              <div className="admin-login-footer">
+                <button
+                  type="button"
+                  className="admin-login-back-link"
+                  onClick={() => navigateTo('attendance')}
+                >
+                  <ArrowLeft size={14} />
+                  <span>Return to Staff Attendance</span>
+                </button>
+              </div>
+            </div>
+          </main>
+        ) : (
+          <main className="admin-container">
+            {/* Admin Header with Sub-tabs */}
+            <div className="admin-header-card">
+              <div className="admin-title-row">
+                <div>
+                  <h1 className="admin-title">Admin Dashboard</h1>
+                  <p className="admin-subtitle">Manage branch locations, staff members, and attendance records</p>
+                  <div className="admin-auth-badge">
+                    <ShieldCheck size={13} color="#e11d24" />
+                    <span>Logged in as hr@lordsandkings.co</span>
+                  </div>
+                </div>
 
               {/* Top Navigation Sub-Tabs */}
               <div className="admin-nav-tabs">
@@ -1387,6 +1561,7 @@ export default function App() {
             </div>
           )}
         </main>
+        )
       )}
 
       {/* ================= MODAL: ADD BRANCH ================= */}
