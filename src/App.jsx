@@ -313,6 +313,25 @@ export default function App() {
     window.scrollTo(0, 0);
   };
 
+  // Subtle logo click counter (triple click opens admin portal without needing URL bar)
+  const logoClickRef = useRef({ count: 0, lastTime: 0 });
+  const handleLogoClick = () => {
+    const now = Date.now();
+    if (now - logoClickRef.current.lastTime < 500) {
+      logoClickRef.current.count += 1;
+    } else {
+      logoClickRef.current.count = 1;
+    }
+    logoClickRef.current.lastTime = now;
+
+    if (logoClickRef.current.count >= 3) {
+      logoClickRef.current.count = 0;
+      navigateTo('admin');
+    } else if (view !== 'attendance') {
+      navigateTo('attendance');
+    }
+  };
+
   // Currently active branch on attendance form
   const currentFormBranch = branches.find(b => b.id === selectedBranchId);
   const currentBranchEmployees = currentFormBranch?.employees || [];
@@ -786,10 +805,11 @@ export default function App() {
       <header className="header">
         <div 
           className="logo-container" 
-          onClick={() => navigateTo('attendance')} 
+          onClick={handleLogoClick} 
           role="button" 
           tabIndex={0} 
           style={{ cursor: 'pointer' }}
+          title="Convenio Mart"
         >
           <svg className="logo-svg" viewBox="0 0 160 50" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M4 14H18M2 20H15M6 26H17" stroke="#e11d24" strokeWidth="3" strokeLinecap="round"/>
@@ -803,35 +823,25 @@ export default function App() {
           </svg>
         </div>
 
-        {/* Dynamic Navigation Button & Supabase Status */}
-        <div className="nav-actions">
-          {supabaseStatus.tablesReady ? (
-            <div className="supabase-status-pill live" title="Supabase Cloud Database Connected">
-              <span className="live-dot green"></span>
-              <span>Cloud Connected</span>
-            </div>
-          ) : (
-            <button 
-              className="supabase-status-pill setup" 
-              onClick={() => setShowSqlModal(true)}
-              title="Click to view Supabase database setup SQL"
-            >
-              <Database size={13} />
-              <span>Supabase Setup</span>
-            </button>
-          )}
+        {/* Dynamic Navigation Button & Supabase Status (Hidden on attendance view, visible only in Admin view) */}
+        {view === 'admin' && (
+          <div className="nav-actions">
+            {supabaseStatus.tablesReady ? (
+              <div className="supabase-status-pill live" title="Supabase Cloud Database Connected">
+                <span className="live-dot green"></span>
+                <span>Cloud Connected</span>
+              </div>
+            ) : (
+              <button 
+                className="supabase-status-pill setup" 
+                onClick={() => setShowSqlModal(true)}
+                title="Click to view Supabase database setup SQL"
+              >
+                <Database size={13} />
+                <span>Supabase Setup</span>
+              </button>
+            )}
 
-          {view === 'attendance' ? (
-            <button 
-              id="nav-to-admin-btn"
-              className="history-switch-btn admin-nav-btn"
-              onClick={() => navigateTo('admin')}
-              title="Open Admin Portal to Manage Branches, Employees & Records"
-            >
-              <ShieldCheck size={18} className="admin-nav-icon" />
-              <span>Admin Portal</span>
-            </button>
-          ) : (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
               <button 
                 id="nav-back-to-attendance-btn"
@@ -853,8 +863,8 @@ export default function App() {
                 </button>
               )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </header>
 
       {/* ================= 1. USER ATTENDANCE VIEW ================= */}
