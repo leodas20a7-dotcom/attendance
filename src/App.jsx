@@ -548,7 +548,17 @@ export default function App() {
     startCamera(actionType);
   };
 
-  // Start Front Camera Stream (Strictly Front Camera Only)
+  // Keep live stream connected to the video element whenever active
+  useEffect(() => {
+    if (cameraActive && streamRef.current && videoRef.current && !capturedPhoto) {
+      if (videoRef.current.srcObject !== streamRef.current) {
+        videoRef.current.srcObject = streamRef.current;
+      }
+      videoRef.current.play().catch(console.warn);
+    }
+  }, [cameraActive, capturedPhoto, isCameraLoading]);
+
+  // Start Front Camera Stream (with universal fallbacks for mobile, laptop & desktop webcams)
   const startCamera = async (actionType) => {
     setCurrentActionType(actionType);
     setCapturedPhoto(null);
@@ -561,39 +571,54 @@ export default function App() {
       streamRef.current = null;
     }
 
-    try {
-      // Strictly front selfie camera
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: 'user' },
-          width: { ideal: 1280 },
-          height: { ideal: 1280 }
-        },
-        audio: false
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-      setIsCameraLoading(false);
-    } catch (err) {
-      console.error('Front camera access error:', err);
-      // Fallback request explicitly for front camera
+    // Try camera constraints with graceful progressive fallbacks:
+    // 1. Front selfie camera with ideal resolution
+    // 2. Front camera without strict resolution
+    // 3. Any available camera (crucial for laptops/desktops where facingMode throws error)
+    const constraintsList = [
+      { video: { facingMode: { ideal: 'user' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
+      { video: { facingMode: 'user' }, audio: false },
+      { video: true, audio: false }
+    ];
+
+    let acquiredStream = null;
+
+    for (const constraint of constraintsList) {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { facingMode: 'user' }, 
-          audio: false 
-        });
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-        setIsCameraLoading(false);
-      } catch (fallbackErr) {
-        setIsCameraLoading(false);
-        setCameraError('Permission required: Please allow camera access in your browser to verify attendance.');
+        acquiredStream = await navigator.mediaDevices.getUserMedia(constraint);
+        if (acquiredStream) break;
+      } catch (err) {
+        console.warn('Camera constraint attempt failed:', constraint, err);
       }
     }
+
+    if (!acquiredStream) {
+      setIsCameraLoading(false);
+      setCameraError('Permission required: Please allow camera access in your browser to verify attendance.');
+      return;
+    }
+
+    streamRef.current = acquiredStream;
+
+    // Attach stream to video element and start playback
+    const tryAttach = (retries = 10) => {
+      if (videoRef.current) {
+        videoRef.current.srcObject = acquiredStream;
+        videoRef.current.onloadedmetadata = () => {
+          if (videoRef.current) {
+            videoRef.current.play().catch(console.warn);
+          }
+        };
+        videoRef.current.play().catch(console.warn);
+        setIsCameraLoading(false);
+      } else if (retries > 0) {
+        setTimeout(() => tryAttach(retries - 1), 50);
+      } else {
+        setIsCameraLoading(false);
+      }
+    };
+
+    tryAttach();
   };
 
   // Stop camera stream
@@ -602,7 +627,11 @@ export default function App() {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
     setCameraActive(false);
+    setIsCameraLoading(false);
     setCapturedPhoto(null);
     setCameraError('');
   };
@@ -1857,32 +1886,45 @@ export default function App() {
                     <span>Allow & Open Camera</span>
                   </button>
                 </div>
-              ) : isCameraLoading ? (
-                <div className="camera-loading-container">
-                  <Loader2 className="spinner" size={32} color="#ffffff" />
-                  <p>Opening front camera...</p>
-                </div>
-              ) : !capturedPhoto ? (
-                <div className="video-stream-box">
-                  <video 
-                    ref={videoRef} 
-                    autoPlay 
-                    playsInline 
-                    muted 
-                    className="live-video mirror-video"
-                  />
-                  <div className="face-guide-overlay">
-                    <div className="face-oval-guide"></div>
-                    <span className="face-guide-text">Position face inside guide</span>
-                  </div>
-                </div>
               ) : (
-                <div className="captured-preview-box">
-                  <img src={capturedPhoto} alt="Captured Photo" className="preview-img" />
-                  <div className="preview-stamp">
-                    <CheckCircle2 size={16} /> Photo Captured
-                  </div>
-                </div>
+                <>
+                  {/* Keep video element permanently in DOM so videoRef is always attached */}
+                  {!capturedPhoto && (
+                    <div className="video-stream-box">
+                      <video 
+                        ref={videoRef} 
+                        autoPlay 
+                        playsInline 
+                        muted 
+                        className="live-video mirror-video"
+                        onLoadedMetadata={(e) => {
+                          e.target.play().catch(console.warn);
+                        }}
+                      />
+                      <div className="face-guide-overlay">
+                        <div className="face-oval-guide"></div>
+                        <span className="face-guide-text">Position face inside guide</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Loading spinner rendered as overlay without destroying the video element */}
+                  {isCameraLoading && (
+                    <div className="camera-loading-container">
+                      <Loader2 className="spinner" size={32} color="#ffffff" />
+                      <p>Opening front camera...</p>
+                    </div>
+                  )}
+
+                  {capturedPhoto && (
+                    <div className="captured-preview-box">
+                      <img src={capturedPhoto} alt="Captured Photo" className="preview-img" />
+                      <div className="preview-stamp">
+                        <CheckCircle2 size={16} /> Photo Captured
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
 
               <canvas ref={canvasRef} style={{ display: 'none' }} />
