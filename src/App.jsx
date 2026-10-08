@@ -831,22 +831,6 @@ export default function App() {
         {/* Dynamic Navigation: Admin tools on admin view; Sleek History button on attendance view */}
         {view === 'admin' ? (
           <div className="nav-actions">
-            {supabaseStatus.tablesReady ? (
-              <div className="supabase-status-pill live" title="Supabase Cloud Database Connected">
-                <span className="live-dot green"></span>
-                <span>Cloud Connected</span>
-              </div>
-            ) : (
-              <button 
-                className="supabase-status-pill setup" 
-                onClick={() => setShowSqlModal(true)}
-                title="Click to view Supabase database setup SQL"
-              >
-                <Database size={13} />
-                <span>Supabase Setup</span>
-              </button>
-            )}
-
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
               <button 
                 id="nav-back-to-attendance-btn"
@@ -1099,86 +1083,57 @@ export default function App() {
             {/* Admin Header with Sub-tabs */}
             <div className="admin-header-card">
               <div className="admin-title-row">
-                <div>
+                <div className="admin-title-left">
                   <h1 className="admin-title">Admin Dashboard</h1>
-                  <p className="admin-subtitle">Manage branch locations, staff members, and attendance records</p>
                   <div className="admin-auth-badge">
                     <ShieldCheck size={13} color="#e11d24" />
-                    <span>Logged in as hr@lordsandkings.co</span>
+                    <span>hr@lordsandkings.co</span>
                   </div>
                 </div>
 
-              {/* Top Navigation Sub-Tabs */}
-              <div className="admin-nav-tabs">
-                <button 
-                  id="tab-btn-branches"
-                  className={`admin-tab-btn ${adminTab === 'branches' ? 'active' : ''}`}
-                  onClick={() => setAdminTab('branches')}
-                >
-                  <Building2 size={16} />
-                  <span>Branches & Staff</span>
-                  <span className="tab-pill-counter">{branches.length}</span>
-                </button>
-                <button 
-                  id="tab-btn-logs"
-                  className={`admin-tab-btn ${adminTab === 'logs' ? 'active' : ''}`}
-                  onClick={() => setAdminTab('logs')}
-                >
-                  <History size={16} />
-                  <span>Attendance Logs</span>
-                  <span className="tab-pill-counter">{records.length}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Supabase Cloud Database Status Card */}
-            <div className="supabase-admin-card">
-              <div className="supabase-card-left">
-                <div className={`supabase-icon-box ${supabaseStatus.tablesReady ? 'connected' : 'setup'}`}>
-                  <Database size={18} />
-                </div>
-                <div className="supabase-card-info">
-                  <div className="supabase-card-title-row">
-                    <strong>Supabase Cloud Database</strong>
-                    <span className={`supabase-badge ${supabaseStatus.tablesReady ? 'ready' : 'pending'}`}>
-                      {supabaseStatus.tablesReady ? '● Connected' : 'Setup Required'}
-                    </span>
-                  </div>
-                  <p className="supabase-card-sub">
-                    Project: <code>ykdhjkzrprafzivvguhh</code>
-                    {supabaseStatus.tablesReady 
-                      ? ' • All branches, employees and selfie attendance logs are synchronized with Supabase.' 
-                      : ' • Run the SQL script once in your Supabase SQL editor to enable cloud syncing.'}
-                  </p>
+                {/* Top Navigation Sub-Tabs */}
+                <div className="admin-nav-tabs">
+                  <button 
+                    id="tab-btn-branches"
+                    className={`admin-tab-btn ${adminTab === 'branches' ? 'active' : ''}`}
+                    onClick={() => setAdminTab('branches')}
+                  >
+                    <Building2 size={16} />
+                    <span>Branches & Staff</span>
+                    <span className="tab-pill-counter">{branches.length}</span>
+                  </button>
+                  <button 
+                    id="tab-btn-logs"
+                    className={`admin-tab-btn ${adminTab === 'logs' ? 'active' : ''}`}
+                    onClick={() => setAdminTab('logs')}
+                  >
+                    <History size={16} />
+                    <span>Attendance Logs</span>
+                    <span className="tab-pill-counter">{records.length}</span>
+                  </button>
                 </div>
               </div>
 
-              <button className="btn-setup-supabase" onClick={() => setShowSqlModal(true)}>
-                <Database size={14} />
-                <span>{supabaseStatus.tablesReady ? 'View SQL Schema' : 'Setup SQL Schema'}</span>
-              </button>
-            </div>
-
-            {/* High Level Metrics Bar */}
-            <div className="admin-stats-grid">
-              <div className="stat-card">
-                <span className="stat-label">Total Branches</span>
-                <span className="stat-val text-navy">{branches.length}</span>
-              </div>
-              <div className="stat-card">
-                <span className="stat-label">Total Employees</span>
-                <span className="stat-val text-red">{totalEmployeesCount}</span>
-              </div>
-              <div className="stat-card">
-                <span className="stat-label">Today's Check Ins</span>
-                <span className="stat-val text-green">{records.filter(r => r.type === 'in').length}</span>
-              </div>
-              <div className="stat-card">
-                <span className="stat-label">Total Attendance Logs</span>
-                <span className="stat-val">{records.length}</span>
+              {/* High Level Metrics Bar */}
+              <div className="admin-stats-grid">
+                <div className="stat-card">
+                  <span className="stat-label">Total Branches</span>
+                  <span className="stat-val text-navy">{branches.length}</span>
+                </div>
+                <div className="stat-card">
+                  <span className="stat-label">Total Staff</span>
+                  <span className="stat-val text-red">{totalEmployeesCount}</span>
+                </div>
+                <div className="stat-card">
+                  <span className="stat-label">Today's Check Ins</span>
+                  <span className="stat-val text-green">{records.filter(r => r.type === 'in').length}</span>
+                </div>
+                <div className="stat-card">
+                  <span className="stat-label">Total Attendance Logs</span>
+                  <span className="stat-val">{records.length}</span>
+                </div>
               </div>
             </div>
-          </div>
 
           {/* TAB 1: BRANCH & EMPLOYEE MANAGEMENT */}
           {adminTab === 'branches' && (
@@ -1190,7 +1145,6 @@ export default function App() {
                     <Building2 size={18} className="card-icon-navy" />
                     <div>
                       <h3>Branches ({branches.length})</h3>
-                      <p className="sub-text">Select branch to view/edit employees</p>
                     </div>
                   </div>
                   <button 
@@ -1224,34 +1178,27 @@ export default function App() {
                               <Store size={18} />
                             </div>
                             <div className="branch-meta">
-                              <div className="branch-name-line">
-                                <strong className="branch-title">{b.name}</strong>
-                                {b.code && <span className="branch-code-badge">{b.code}</span>}
-                              </div>
-                              <div className="branch-sub-line">
-                                <span className="branch-loc-text">{b.address || 'Bengaluru'}</span>
-                                <span className="branch-dot">•</span>
-                                <span className="branch-emp-count">
-                                  <Users size={12} /> {empCount} {empCount === 1 ? 'Employee' : 'Employees'}
-                                </span>
-                              </div>
+                              <strong className="branch-title">{b.name}</strong>
+                              <span className="branch-emp-pill">
+                                <Users size={11} /> {empCount} staff
+                              </span>
                             </div>
                           </div>
 
                           <div className="branch-item-actions" onClick={(e) => e.stopPropagation()}>
                             <button 
                               className="btn-icon-edit"
-                              title="Edit Branch Name & Details"
+                              title="Edit Branch Name"
                               onClick={() => setEditingBranch(b)}
                             >
-                              <Pencil size={15} />
+                              <Pencil size={14} />
                             </button>
                             <button 
                               className="btn-icon-delete"
                               title="Delete Branch"
                               onClick={() => handleDeleteBranch(b.id)}
                             >
-                              <Trash2 size={15} />
+                              <Trash2 size={14} />
                             </button>
                           </div>
                         </div>
@@ -1269,7 +1216,7 @@ export default function App() {
                       <div className="column-card-title">
                         <Users size={18} className="card-icon-red" />
                         <div>
-                          <h3>Employees for "{currentAdminBranch.name}"</h3>
+                          <h3>{currentAdminBranch.name}</h3>
                           <p className="sub-text">
                             {currentAdminBranch.employees?.length || 0} registered staff members
                           </p>
@@ -1277,30 +1224,17 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Quick Add Employee Form for this Branch */}
+                    {/* Clean Add Employee Form */}
                     <form className="add-emp-form-card" onSubmit={handleAddEmployee}>
-                      <div className="form-sub-header">
-                        <UserPlus size={16} />
-                        <span>Add New Employee to {currentAdminBranch.name}</span>
-                      </div>
                       <div className="add-emp-inputs-row">
                         <div className="input-group-grow">
                           <input 
                             id="new-emp-name-input"
                             type="text" 
                             required 
-                            placeholder="Employee Full Name (e.g. Ramesh Kumar)" 
+                            placeholder="Add employee name (e.g. Ramesh Kumar)" 
                             value={newEmpName}
                             onChange={(e) => setNewEmpName(e.target.value)}
-                          />
-                        </div>
-                        <div className="input-group-role">
-                          <input 
-                            id="new-emp-role-input"
-                            type="text" 
-                            placeholder="Role / Designation (e.g. Cashier, Store Manager)" 
-                            value={newEmpRole}
-                            onChange={(e) => setNewEmpRole(e.target.value)}
                           />
                         </div>
                         <button 
@@ -1309,7 +1243,7 @@ export default function App() {
                           className="btn-add-emp"
                         >
                           <Plus size={16} />
-                          <span>Add</span>
+                          <span>Add Staff</span>
                         </button>
                       </div>
                     </form>
@@ -1351,14 +1285,13 @@ export default function App() {
                                 </div>
                                 <div className="emp-item-info">
                                   <strong className="emp-item-name">{emp.name}</strong>
-                                  {emp.role && <span className="emp-item-role">{emp.role}</span>}
                                 </div>
                               </div>
 
                               <div className="emp-item-actions">
                                 <button 
                                   className="btn-icon-edit"
-                                  title="Edit Employee Name / Role"
+                                  title="Edit Employee Name"
                                   onClick={() => setEditingEmp({
                                     branchId: currentAdminBranch.id,
                                     empId: emp.id,
@@ -1755,7 +1688,7 @@ export default function App() {
             <div className="modal-header-row">
               <div className="modal-title-with-icon">
                 <Store size={20} className="modal-icon-brand" />
-                <h3>Add New Branch Location</h3>
+                <h3>Add New Branch</h3>
               </div>
               <button className="icon-close-btn" onClick={() => setShowAddBranchModal(false)}>
                 <X size={20} />
@@ -1769,32 +1702,10 @@ export default function App() {
                   id="modal-branch-name"
                   type="text" 
                   required 
-                  placeholder="e.g. Indiranagar Flagship, Koramangala 4th Block"
+                  placeholder="e.g. Casagrand Royale, Indiranagar"
                   value={newBranchName}
                   onChange={(e) => setNewBranchName(e.target.value)}
                   autoFocus
-                />
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="modal-branch-code">Branch Code (Optional)</label>
-                <input 
-                  id="modal-branch-code"
-                  type="text" 
-                  placeholder="e.g. CM-BLR-06"
-                  value={newBranchCode}
-                  onChange={(e) => setNewBranchCode(e.target.value)}
-                />
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="modal-branch-address">Location / Address (Optional)</label>
-                <input 
-                  id="modal-branch-address"
-                  type="text" 
-                  placeholder="e.g. 100ft Road, Bengaluru"
-                  value={newBranchAddress}
-                  onChange={(e) => setNewBranchAddress(e.target.value)}
                 />
               </div>
 
@@ -1819,7 +1730,7 @@ export default function App() {
             <div className="modal-header-row">
               <div className="modal-title-with-icon">
                 <Pencil size={20} className="modal-icon-brand" />
-                <h3>Edit Branch Name</h3>
+                <h3>Edit Branch</h3>
               </div>
               <button className="icon-close-btn" onClick={() => setEditingBranch(null)}>
                 <X size={20} />
@@ -1836,26 +1747,6 @@ export default function App() {
                   value={editingBranch.name}
                   onChange={(e) => setEditingBranch({ ...editingBranch, name: e.target.value })}
                   autoFocus
-                />
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="edit-branch-code">Branch Code</label>
-                <input 
-                  id="edit-branch-code"
-                  type="text" 
-                  value={editingBranch.code || ''}
-                  onChange={(e) => setEditingBranch({ ...editingBranch, code: e.target.value })}
-                />
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="edit-branch-address">Location / Address</label>
-                <input 
-                  id="edit-branch-address"
-                  type="text" 
-                  value={editingBranch.address || ''}
-                  onChange={(e) => setEditingBranch({ ...editingBranch, address: e.target.value })}
                 />
               </div>
 
@@ -1880,7 +1771,7 @@ export default function App() {
             <div className="modal-header-row">
               <div className="modal-title-with-icon">
                 <Pencil size={20} className="modal-icon-brand" />
-                <h3>Edit Employee Details</h3>
+                <h3>Edit Employee</h3>
               </div>
               <button className="icon-close-btn" onClick={() => setEditingEmp(null)}>
                 <X size={20} />
@@ -1897,16 +1788,6 @@ export default function App() {
                   value={editingEmp.name}
                   onChange={(e) => setEditingEmp({ ...editingEmp, name: e.target.value })}
                   autoFocus
-                />
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="edit-emp-role">Role / Designation</label>
-                <input 
-                  id="edit-emp-role"
-                  type="text" 
-                  value={editingEmp.role}
-                  onChange={(e) => setEditingEmp({ ...editingEmp, role: e.target.value })}
                 />
               </div>
 

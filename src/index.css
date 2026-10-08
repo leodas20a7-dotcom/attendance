@@ -331,16 +331,18 @@ body {
   gap: 1rem;
 }
 
+.admin-title-left {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+}
+
 .admin-title {
   font-size: 1.45rem;
   font-weight: 800;
   color: var(--brand-navy);
-}
-
-.admin-subtitle {
-  font-size: 0.86rem;
-  color: var(--text-muted);
-  margin-top: 0.15rem;
+  margin: 0;
 }
 
 .admin-nav-tabs {
@@ -602,6 +604,24 @@ body {
   gap: 0.25rem;
   font-weight: 600;
   color: var(--brand-navy);
+}
+
+.branch-emp-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: #f1f5f9;
+  padding: 0.15rem 0.55rem;
+  border-radius: 6px;
+  width: fit-content;
+}
+
+.branch-item-card.active-branch .branch-emp-pill {
+  background: #fee2e2;
+  color: var(--brand-red);
 }
 
 .branch-item-actions {
