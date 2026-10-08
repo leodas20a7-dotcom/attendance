@@ -345,10 +345,79 @@ export default function App() {
   // Active employee name on attendance form
   const activeFormEmpName = currentFormEmployee ? currentFormEmployee.name : customEmployeeName.trim();
 
+  // Helper to reliably check if a record was recorded today across any browser locale / format
+  const isRecordToday = (r) => {
+    if (!r) return false;
+    const now = new Date();
+    const curYear = now.getFullYear();
+    const curMonth = now.getMonth();
+    const curDate = now.getDate();
+
+    // 1. Try parsing numeric timestamp from ID (e.g. REC-1791438659468)
+    if (r.id && typeof r.id === 'string' && r.id.startsWith('REC-')) {
+      const ts = Number(r.id.slice(4));
+      if (!isNaN(ts) && ts > 1600000000000) {
+        const d = new Date(ts);
+        if (d.getFullYear() === curYear && d.getMonth() === curMonth && d.getDate() === curDate) {
+          return true;
+        }
+      }
+    }
+
+    // 2. Try explicit timestamp property
+    if (r.timestamp && !isNaN(Number(r.timestamp))) {
+      const d = new Date(Number(r.timestamp));
+      if (d.getFullYear() === curYear && d.getMonth() === curMonth && d.getDate() === curDate) {
+        return true;
+      }
+    }
+
+    // 3. Try created_at (Supabase ISO timestamp)
+    if (r.created_at) {
+      const d = new Date(r.created_at);
+      if (!isNaN(d.getTime())) {
+        if (d.getFullYear() === curYear && d.getMonth() === curMonth && d.getDate() === curDate) {
+          return true;
+        }
+      }
+    }
+
+    // 4. Try parsing r.date (handles "8 Oct 2026", "Oct 8, 2026", "2026-10-08", etc.)
+    if (r.date) {
+      const d = new Date(r.date);
+      if (!isNaN(d.getTime())) {
+        if (d.getFullYear() === curYear && d.getMonth() === curMonth && d.getDate() === curDate) {
+          return true;
+        }
+      }
+
+      // 5. String component matching (handles non-standard locale formatting)
+      const dateStr = String(r.date).toLowerCase();
+      const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+      const curMonthName = monthNames[curMonth];
+      const curDateStr = String(curDate);
+      const curYearStr = String(curYear);
+
+      if (
+        dateStr.includes(curMonthName) &&
+        dateStr.includes(curYearStr) &&
+        (dateStr.includes(curDateStr) || dateStr.includes(curDateStr.padStart(2, '0')))
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
   // Smart Status Detection: Find latest attendance record for this employee today
-  const todayDateString = new Date().toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
   const latestTodayRecord = activeFormEmpName 
-    ? records.find(r => r.employeeName && r.employeeName.toLowerCase() === activeFormEmpName.toLowerCase() && r.date === todayDateString)
+    ? records.find(r => {
+        const empName = (r.employeeName || r.name || '').trim().toLowerCase();
+        const targetName = activeFormEmpName.trim().toLowerCase();
+        const matchesEmp = empName === targetName || empName.includes(targetName) || targetName.includes(empName);
+        return matchesEmp && isRecordToday(r);
+      })
     : null;
 
   // Active branch in Admin Management
@@ -709,6 +778,7 @@ export default function App() {
     const finishRecord = (locationData) => {
       const newRecord = {
         id: 'REC-' + Date.now(),
+        timestamp: now.getTime(),
         employeeName: activeEmpName,
         employeeRole: activeEmpRole,
         branchName: activeBranchName,
