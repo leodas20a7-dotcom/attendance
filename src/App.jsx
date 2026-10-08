@@ -72,6 +72,10 @@ export default function App() {
   // Admin sub-tab: 'branches' or 'logs'
   const [adminTab, setAdminTab] = useState('branches');
 
+  // Flash / Splash Loading Screen State
+  const [appLoading, setAppLoading] = useState(true);
+  const [loadingFadingOut, setLoadingFadingOut] = useState(false);
+
   // Master Branch & Employee Data
   const [branches, setBranches] = useState(getStoredBranches);
 
@@ -200,6 +204,19 @@ export default function App() {
     }
 
     initSupabase();
+  }, []);
+
+  // Flash / Splash Loading Screen Timer (smooth fade-out)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setLoadingFadingOut(true);
+      const closeTimer = setTimeout(() => {
+        setAppLoading(false);
+      }, 500);
+      return () => clearTimeout(closeTimer);
+    }, 1100);
+
+    return () => clearTimeout(timer);
   }, []);
 
   const copySqlToClipboard = () => {
@@ -681,6 +698,34 @@ export default function App() {
 
   return (
     <div className="page-wrapper">
+      {/* Flash Simple Smooth Loading Screen */}
+      {appLoading && (
+        <div className={`splash-screen ${loadingFadingOut ? 'fade-out' : ''}`} aria-hidden={loadingFadingOut}>
+          <div className="splash-content">
+            <div className="splash-logo-card">
+              <svg className="splash-logo-svg" viewBox="0 0 160 50" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M4 14H18M2 20H15M6 26H17" stroke="#e11d24" strokeWidth="3" strokeLinecap="round"/>
+                <path d="M19 12H35L33 28H21L19 12Z" fill="#e11d24"/>
+                <circle cx="27" cy="20" r="4.5" fill="white"/>
+                <path d="M28.5 18C28.5 18 26.5 17.5 25.5 19C24.5 20.5 25.5 22 27 22C28.5 22 28.5 21 28.5 21" stroke="#e11d24" strokeWidth="1.8" strokeLinecap="round" fill="none"/>
+                <circle cx="22" cy="33" r="2.5" fill="#e11d24"/>
+                <circle cx="32" cy="33" r="2.5" fill="#e11d24"/>
+                <text x="43" y="27" fontFamily="'Plus Jakarta Sans', serif, sans-serif" fontWeight="800" fontSize="23" fill="#182238">Convenio</text>
+                <text x="73" y="42" fontFamily="'Plus Jakarta Sans', sans-serif" fontWeight="800" fontSize="13" fill="#e11d24" letterSpacing="1">Mart</text>
+              </svg>
+              <span className="splash-tagline">Staff Attendance Portal</span>
+              <div className="splash-loader-track">
+                <div className="splash-loader-bar"></div>
+              </div>
+              <div className="splash-status-text">
+                <span className="splash-pulse-dot"></span>
+                <span>Initializing portal...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top Navbar Header */}
       <header className="header">
         <div 
