@@ -146,6 +146,11 @@ export default function App() {
   const [filterType, setFilterType] = useState('all');
   const [copiedRecordId, setCopiedRecordId] = useState(null);
 
+  // Quick Attendance History Drawer
+  const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
+  const [historySearchTerm, setHistorySearchTerm] = useState('');
+  const [historyFilterType, setHistoryFilterType] = useState('all');
+
   // ================= ADMIN BRANCH & EMPLOYEE EDIT STATE =================
   const [adminSelectedBranchId, setAdminSelectedBranchId] = useState(() => {
     const branchList = getStoredBranches();
@@ -823,8 +828,8 @@ export default function App() {
           </svg>
         </div>
 
-        {/* Dynamic Navigation Button & Supabase Status (Hidden on attendance view, visible only in Admin view) */}
-        {view === 'admin' && (
+        {/* Dynamic Navigation: Admin tools on admin view; Sleek History button on attendance view */}
+        {view === 'admin' ? (
           <div className="nav-actions">
             {supabaseStatus.tablesReady ? (
               <div className="supabase-status-pill live" title="Supabase Cloud Database Connected">
@@ -863,6 +868,21 @@ export default function App() {
                 </button>
               )}
             </div>
+          </div>
+        ) : (
+          <div className="nav-actions">
+            <button
+              id="header-history-btn"
+              className="history-nav-trigger-btn"
+              onClick={() => setShowHistoryDrawer(true)}
+              title="View Staff Check-In & Check-Out History"
+            >
+              <History size={16} className="history-icon" />
+              <span>History</span>
+              {records.length > 0 && (
+                <span className="history-badge-count">{records.length}</span>
+              )}
+            </button>
           </div>
         )}
       </header>
@@ -1572,6 +1592,160 @@ export default function App() {
           )}
         </main>
         )
+      )}
+
+      {/* ================= QUICK ATTENDANCE HISTORY DRAWER ================= */}
+      {showHistoryDrawer && (
+        <div 
+          className="history-drawer-overlay" 
+          onClick={() => setShowHistoryDrawer(false)}
+        >
+          <div 
+            className="history-drawer-panel" 
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Drawer Header */}
+            <div className="history-drawer-header">
+              <div className="history-header-title-box">
+                <div className="history-header-icon-badge">
+                  <History size={20} />
+                </div>
+                <div>
+                  <h2 className="history-drawer-title">Attendance History</h2>
+                  <p className="history-drawer-subtitle">
+                    Recent check-in and check-out logs
+                  </p>
+                </div>
+              </div>
+
+              <button 
+                className="history-drawer-close-btn"
+                onClick={() => setShowHistoryDrawer(false)}
+                title="Close history"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Quick Filters & Search */}
+            <div className="history-drawer-controls">
+              <div className="history-search-wrapper">
+                <Search size={15} className="history-search-icon" />
+                <input
+                  type="text"
+                  placeholder="Search staff name or branch..."
+                  value={historySearchTerm}
+                  onChange={(e) => setHistorySearchTerm(e.target.value)}
+                  className="history-search-input"
+                />
+                {historySearchTerm && (
+                  <button 
+                    className="history-search-clear" 
+                    onClick={() => setHistorySearchTerm('')}
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+
+              <div className="history-tabs-row">
+                <button
+                  className={`history-filter-chip ${historyFilterType === 'all' ? 'active' : ''}`}
+                  onClick={() => setHistoryFilterType('all')}
+                >
+                  All ({records.length})
+                </button>
+                <button
+                  className={`history-filter-chip chip-in ${historyFilterType === 'in' ? 'active' : ''}`}
+                  onClick={() => setHistoryFilterType('in')}
+                >
+                  Check In ({records.filter(r => r.type === 'in').length})
+                </button>
+                <button
+                  className={`history-filter-chip chip-out ${historyFilterType === 'out' ? 'active' : ''}`}
+                  onClick={() => setHistoryFilterType('out')}
+                >
+                  Check Out ({records.filter(r => r.type === 'out').length})
+                </button>
+              </div>
+            </div>
+
+            {/* History List */}
+            <div className="history-drawer-list">
+              {records
+                .filter((r) => {
+                  const s = historySearchTerm.toLowerCase();
+                  const matchesSearch = 
+                    !s || 
+                    r.employeeName.toLowerCase().includes(s) || 
+                    (r.branchName && r.branchName.toLowerCase().includes(s));
+                  const matchesType = historyFilterType === 'all' || r.type === historyFilterType;
+                  return matchesSearch && matchesType;
+                })
+                .length === 0 ? (
+                <div className="history-empty-state">
+                  <Clock size={36} className="history-empty-icon" />
+                  <h4>No logs recorded yet</h4>
+                  <p>
+                    {historySearchTerm 
+                      ? 'No matching attendance records found for this search.' 
+                      : 'Check-in and check-out logs will show up here in real time.'}
+                  </p>
+                </div>
+              ) : (
+                records
+                  .filter((r) => {
+                    const s = historySearchTerm.toLowerCase();
+                    const matchesSearch = 
+                      !s || 
+                      r.employeeName.toLowerCase().includes(s) || 
+                      (r.branchName && r.branchName.toLowerCase().includes(s));
+                    const matchesType = historyFilterType === 'all' || r.type === historyFilterType;
+                    return matchesSearch && matchesType;
+                  })
+                  .map((item) => (
+                    <div key={item.id} className="history-log-card">
+                      <div className="history-log-left">
+                        <div className={`history-action-pill ${item.type === 'in' ? 'pill-in' : 'pill-out'}`}>
+                          {item.type === 'in' ? <LogIn size={12} /> : <LogOut size={12} />}
+                          <span>{item.type === 'in' ? 'Check In' : 'Check Out'}</span>
+                        </div>
+                        <div className="history-log-user-meta">
+                          <strong className="history-log-name">{item.employeeName}</strong>
+                          {item.branchName && (
+                            <span className="history-log-branch">
+                              <MapPin size={11} /> {item.branchName}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="history-log-right">
+                        <div className="history-log-time">
+                          <Clock size={12} />
+                          <span>{item.time || item.shortTime}</span>
+                        </div>
+                        <span className="history-log-date">{item.date}</span>
+                      </div>
+                    </div>
+                  ))
+              )}
+            </div>
+
+            {/* Drawer Footer */}
+            <div className="history-drawer-footer">
+              <span className="history-footer-count">
+                {records.length} total attendance logs
+              </span>
+              <button 
+                className="history-footer-done-btn"
+                onClick={() => setShowHistoryDrawer(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ================= MODAL: ADD BRANCH ================= */}
