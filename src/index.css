@@ -509,6 +509,26 @@ body {
   transform: translateY(-1px);
 }
 
+.clean-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  pointer-events: none;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.clean-btn-out:disabled {
+  background: #f8fafc;
+  color: #94a3b8;
+  border-color: #e2e8f0;
+}
+
+.clean-btn-in:disabled {
+  background: #f1f5f9;
+  color: #94a3b8;
+  border: 1px solid #e2e8f0;
+}
+
 @media (max-width: 480px) {
   .clean-actions {
     gap: 0.65rem;

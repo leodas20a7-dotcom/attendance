@@ -622,24 +622,16 @@ export default function App() {
       return;
     }
 
-    // Smart status duplicate / missing confirmation guardrail
+    // Guardrail: Cannot Check Out if not checked in yet
+    if (actionType === 'out' && latestTodayRecord?.type !== 'in') {
+      setFormValidationMsg('Check In is required first before you can Check Out.');
+      return;
+    }
+
+    // Guardrail: Cannot Check In if already checked in
     if (actionType === 'in' && latestTodayRecord?.type === 'in') {
-      const confirmAnother = window.confirm(
-        `Notice: ${empName} is already Checked In today (at ${latestTodayRecord.shortTime || latestTodayRecord.time}).\n\nDo you want to record another Check In?`
-      );
-      if (!confirmAnother) return;
-    } else if (actionType === 'out' && (!latestTodayRecord || latestTodayRecord?.type === 'out')) {
-      if (!latestTodayRecord) {
-        const confirmOut = window.confirm(
-          `Notice: No Check In was recorded for ${empName} today.\n\nDo you want to proceed with Check Out anyway?`
-        );
-        if (!confirmOut) return;
-      } else if (latestTodayRecord.type === 'out') {
-        const confirmOutAgain = window.confirm(
-          `Notice: ${empName} already Checked Out today at ${latestTodayRecord.shortTime || latestTodayRecord.time}.\n\nDo you want to record another Check Out?`
-        );
-        if (!confirmOutAgain) return;
-      }
+      setFormValidationMsg(`${empName} is already checked in today at ${latestTodayRecord.shortTime || latestTodayRecord.time}. Tap Check Out when leaving.`);
+      return;
     }
 
     setFormValidationMsg('');
@@ -1118,6 +1110,8 @@ export default function App() {
                   id="btn-check-in"
                   className={`clean-btn clean-btn-in ${latestTodayRecord?.type === 'in' ? 'btn-dimmed-secondary' : ''}`}
                   onClick={() => handleActionClick('in')}
+                  disabled={latestTodayRecord?.type === 'in'}
+                  title={latestTodayRecord?.type === 'in' ? `${activeFormEmpName || 'Employee'} is already checked in today` : 'Record Check In'}
                 >
                   <LogIn size={18} />
                   <span>Check In</span>
@@ -1130,6 +1124,8 @@ export default function App() {
                   id="btn-check-out"
                   className={`clean-btn clean-btn-out ${latestTodayRecord?.type === 'in' ? 'btn-highlighted-action' : ''}`}
                   onClick={() => handleActionClick('out')}
+                  disabled={latestTodayRecord?.type !== 'in'}
+                  title={latestTodayRecord?.type !== 'in' ? 'Check in required before checking out' : 'Record Check Out'}
                 >
                   <LogOut size={18} />
                   <span>Check Out</span>
