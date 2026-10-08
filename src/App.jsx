@@ -342,6 +342,15 @@ export default function App() {
   const currentBranchEmployees = currentFormBranch?.employees || [];
   const currentFormEmployee = currentBranchEmployees.find(e => e.id === selectedEmpId);
 
+  // Active employee name on attendance form
+  const activeFormEmpName = currentFormEmployee ? currentFormEmployee.name : customEmployeeName.trim();
+
+  // Smart Status Detection: Find latest attendance record for this employee today
+  const todayDateString = new Date().toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+  const latestTodayRecord = activeFormEmpName 
+    ? records.find(r => r.employeeName && r.employeeName.toLowerCase() === activeFormEmpName.toLowerCase() && r.date === todayDateString)
+    : null;
+
   // Active branch in Admin Management
   const currentAdminBranch = branches.find(b => b.id === adminSelectedBranchId) || branches[0];
 
@@ -542,6 +551,26 @@ export default function App() {
     if (!empName) {
       setFormValidationMsg('Please select your Employee Name.');
       return;
+    }
+
+    // Smart status duplicate / missing confirmation guardrail
+    if (actionType === 'in' && latestTodayRecord?.type === 'in') {
+      const confirmAnother = window.confirm(
+        `Notice: ${empName} is already Checked In today (at ${latestTodayRecord.shortTime || latestTodayRecord.time}).\n\nDo you want to record another Check In?`
+      );
+      if (!confirmAnother) return;
+    } else if (actionType === 'out' && (!latestTodayRecord || latestTodayRecord?.type === 'out')) {
+      if (!latestTodayRecord) {
+        const confirmOut = window.confirm(
+          `Notice: No Check In was recorded for ${empName} today.\n\nDo you want to proceed with Check Out anyway?`
+        );
+        if (!confirmOut) return;
+      } else if (latestTodayRecord.type === 'out') {
+        const confirmOutAgain = window.confirm(
+          `Notice: ${empName} already Checked Out today at ${latestTodayRecord.shortTime || latestTodayRecord.time}.\n\nDo you want to record another Check Out?`
+        );
+        if (!confirmOutAgain) return;
+      }
     }
 
     setFormValidationMsg('');
@@ -972,6 +1001,39 @@ export default function App() {
                 )}
               </div>
 
+              {/* Smart Status Detection Banner */}
+              {activeFormEmpName && (
+                <div className={`smart-status-banner status-${latestTodayRecord?.type || 'none'}`}>
+                  <div className="status-banner-left">
+                    <span className={`status-indicator-dot dot-${latestTodayRecord?.type || 'none'}`}></span>
+                    <div className="status-text-group">
+                      <div className="status-primary-line">
+                        {latestTodayRecord?.type === 'in' ? (
+                          <>
+                            <strong className="status-title-in">Checked In Today</strong>
+                            <span className="status-time-chip">{latestTodayRecord.shortTime || latestTodayRecord.time}</span>
+                          </>
+                        ) : latestTodayRecord?.type === 'out' ? (
+                          <>
+                            <strong className="status-title-out">Checked Out Today</strong>
+                            <span className="status-time-chip">{latestTodayRecord.shortTime || latestTodayRecord.time}</span>
+                          </>
+                        ) : (
+                          <strong className="status-title-none">Not Checked In Today</strong>
+                        )}
+                      </div>
+                      <p className="status-subtext">
+                        {latestTodayRecord?.type === 'in' 
+                          ? 'Shift active • Tap Check Out when your shift ends'
+                          : latestTodayRecord?.type === 'out'
+                          ? 'Shift complete • Ready if starting a new shift'
+                          : 'Tap Check In to begin today\'s shift'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Validation Alert */}
               {formValidationMsg && (
                 <div className="clean-alert">
@@ -984,20 +1046,26 @@ export default function App() {
               <div className="clean-actions">
                 <button 
                   id="btn-check-in"
-                  className="clean-btn clean-btn-in"
+                  className={`clean-btn clean-btn-in ${latestTodayRecord?.type === 'in' ? 'btn-dimmed-secondary' : ''}`}
                   onClick={() => handleActionClick('in')}
                 >
                   <LogIn size={18} />
                   <span>Check In</span>
+                  {(!latestTodayRecord || latestTodayRecord?.type === 'out') && (
+                    <span className="action-tag-pill">Start</span>
+                  )}
                 </button>
 
                 <button 
                   id="btn-check-out"
-                  className="clean-btn clean-btn-out"
+                  className={`clean-btn clean-btn-out ${latestTodayRecord?.type === 'in' ? 'btn-highlighted-action' : ''}`}
                   onClick={() => handleActionClick('out')}
                 >
                   <LogOut size={18} />
                   <span>Check Out</span>
+                  {latestTodayRecord?.type === 'in' && (
+                    <span className="action-tag-pill tag-pill-checkout">End Shift</span>
+                  )}
                 </button>
               </div>
             </div>
