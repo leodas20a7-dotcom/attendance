@@ -66,7 +66,16 @@ export default function App() {
   const getInitialView = () => {
     const path = window.location.pathname;
     const hash = window.location.hash;
-    if (path.startsWith('/admin') || path.startsWith('/history') || hash === '#admin' || hash === '#history') {
+    const search = window.location.search;
+    if (
+      path.startsWith('/admin') || 
+      path.startsWith('/history') || 
+      hash === '#admin' || 
+      hash.startsWith('#admin') || 
+      hash === '#history' ||
+      search.includes('admin') ||
+      search.includes('view=admin')
+    ) {
       return 'admin';
     }
     return 'attendance';
@@ -281,7 +290,16 @@ export default function App() {
     const handleLocationChange = () => {
       const path = window.location.pathname;
       const hash = window.location.hash;
-      if (path.startsWith('/admin') || path.startsWith('/history') || hash === '#admin' || hash === '#history') {
+      const search = window.location.search;
+      if (
+        path.startsWith('/admin') || 
+        path.startsWith('/history') || 
+        hash === '#admin' || 
+        hash.startsWith('#admin') || 
+        hash === '#history' ||
+        search.includes('admin') ||
+        search.includes('view=admin')
+      ) {
         setView('admin');
       } else {
         setView('attendance');
