@@ -28,6 +28,7 @@ import {
   UserPlus,
   SlidersHorizontal,
   ChevronDown,
+  ChevronRight,
   Store,
   ShieldCheck,
   Database,
@@ -1801,29 +1802,48 @@ export default function App() {
                     return matchesSearch && matchesType;
                   })
                   .map((item) => (
-                    <div key={item.id} className="history-log-card">
-                      <div className="history-log-left">
-                        <div className={`history-action-pill ${item.type === 'in' ? 'pill-in' : 'pill-out'}`}>
-                          {item.type === 'in' ? <LogIn size={12} /> : <LogOut size={12} />}
-                          <span>{item.type === 'in' ? 'Check In' : 'Check Out'}</span>
-                        </div>
-                        <div className="history-log-user-meta">
+                    <div 
+                      key={item.id} 
+                      className="history-log-card"
+                      onClick={() => setSelectedRecord(item)}
+                      role="button"
+                      tabIndex={0}
+                      title="Click to view full attendance verification receipt"
+                    >
+                      <div className="history-log-avatar">
+                        {item.photo ? (
+                          <img src={item.photo} alt={item.employeeName} className="history-log-thumb" />
+                        ) : (
+                          <span className="history-log-initial">
+                            {item.employeeName ? item.employeeName.charAt(0).toUpperCase() : 'U'}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="history-log-main">
+                        <div className="history-log-title-row">
                           <strong className="history-log-name">{item.employeeName}</strong>
-                          {item.branchName && (
-                            <span className="history-log-branch">
-                              <MapPin size={11} /> {item.branchName}
-                            </span>
-                          )}
+                          <div className={`history-action-pill ${item.type === 'in' ? 'pill-in' : 'pill-out'}`}>
+                            {item.type === 'in' ? <LogIn size={11} /> : <LogOut size={11} />}
+                            <span>{item.type === 'in' ? 'Check In' : 'Check Out'}</span>
+                          </div>
                         </div>
+                        {item.branchName && (
+                          <span className="history-log-branch">
+                            <MapPin size={11} /> {item.branchName}
+                          </span>
+                        )}
                       </div>
 
                       <div className="history-log-right">
                         <div className="history-log-time">
-                          <Clock size={12} />
+                          <Clock size={11} />
                           <span>{item.time || item.shortTime}</span>
                         </div>
                         <span className="history-log-date">{item.date}</span>
                       </div>
+
+                      <ChevronRight size={15} className="history-log-chevron" />
                     </div>
                   ))
               )}
@@ -1832,7 +1852,7 @@ export default function App() {
             {/* Drawer Footer */}
             <div className="history-drawer-footer">
               <span className="history-footer-count">
-                {records.length} total attendance logs
+                {records.length} total attendance {records.length === 1 ? 'log' : 'logs'}
               </span>
               <button 
                 className="history-footer-done-btn"
