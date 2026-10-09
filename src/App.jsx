@@ -2191,7 +2191,9 @@ export default function App() {
                   title="Click to view full photo"
                 >
                   <img src={selectedRecord.photo} alt={selectedRecord.employeeName} className="receipt-avatar-img" />
-                  <span className="receipt-zoom-hint"><Eye size={11} /></span>
+                  <div className="receipt-zoom-hint">
+                    <Eye size={16} />
+                  </div>
                 </div>
                 <div className="receipt-person-details">
                   <h3 className="receipt-person-name">{selectedRecord.employeeName}</h3>
