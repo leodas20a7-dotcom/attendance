@@ -2162,131 +2162,116 @@ export default function App() {
       {/* ================= MODAL: DETAILED RECORD VIEW ================= */}
       {selectedRecord && (
         <div className="modal-overlay" onClick={() => setSelectedRecord(null)}>
-          <div className="modal-content record-detail-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="detail-modal-header">
-              <div className="detail-modal-title-box">
-                <span className={`table-badge ${selectedRecord.type === 'in' ? 'badge-in' : 'badge-out'}`}>
-                  {selectedRecord.type === 'in' ? <LogIn size={14} /> : <LogOut size={14} />}
-                  <span>{selectedRecord.type === 'in' ? 'Check In Record' : 'Check Out Record'}</span>
+          <div className="modal-content clean-receipt-modal" onClick={(e) => e.stopPropagation()}>
+            {/* Modal Top Bar */}
+            <div className="receipt-header">
+              <div className="receipt-header-left">
+                <span className={`receipt-type-pill ${selectedRecord.type === 'in' ? 'pill-checkin' : 'pill-checkout'}`}>
+                  {selectedRecord.type === 'in' ? <LogIn size={13} /> : <LogOut size={13} />}
+                  <span>{selectedRecord.type === 'in' ? 'Check In' : 'Check Out'}</span>
                 </span>
-                <span className="detail-record-id">{selectedRecord.id}</span>
+                <span className="receipt-date-text">{selectedRecord.date}</span>
               </div>
-              <button className="icon-close-btn" onClick={() => setSelectedRecord(null)}>
-                <X size={20} />
+              <button 
+                className="icon-close-btn" 
+                onClick={() => setSelectedRecord(null)}
+                aria-label="Close modal"
+              >
+                <X size={18} />
               </button>
             </div>
 
-            <div className="detail-modal-body">
-              <div className="detail-profile-hero">
+            <div className="receipt-body">
+              {/* Employee Identity Hero */}
+              <div className="receipt-person-row">
                 <div 
-                  className="detail-photo-wrapper" 
+                  className="receipt-avatar-wrapper"
                   onClick={() => setViewingPhoto(selectedRecord)}
-                  title="Click to view full screen"
+                  title="Click to view full photo"
                 >
-                  <img src={selectedRecord.photo} alt="Live Capture" className="detail-selfie-img" />
-                  <div className="detail-photo-zoom-tag">
-                    <Eye size={12} /> Full Size
-                  </div>
+                  <img src={selectedRecord.photo} alt={selectedRecord.employeeName} className="receipt-avatar-img" />
+                  <span className="receipt-zoom-hint"><Eye size={11} /></span>
                 </div>
-                <div className="detail-profile-info">
-                  <h3>{selectedRecord.employeeName}</h3>
-                  {selectedRecord.employeeRole && (
-                    <span className="emp-role-pill">{selectedRecord.employeeRole}</span>
-                  )}
-                  <div className="detail-branch-badge">
-                    <Building2 size={14} />
-                    <span>Branch: <strong>{selectedRecord.branchName || '-'}</strong></span>
-                  </div>
-                  <div className="detail-verified-pill">
-                    <CheckCircle2 size={13} />
-                    <span>Verified Live Photo & GPS Pin</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="detail-info-grid">
-                <div className="detail-info-card">
-                  <span className="info-card-label">Timestamp</span>
-                  <div className="info-card-val-group">
-                    <Clock size={16} className="info-card-icon" />
-                    <strong>{selectedRecord.time || selectedRecord.shortTime}</strong>
-                  </div>
-                  <span className="info-card-sub">{selectedRecord.date}</span>
-                </div>
-
-                <div className="detail-info-card">
-                  <span className="info-card-label">Action Type</span>
-                  <div className="info-card-val-group">
-                    {selectedRecord.type === 'in' ? (
-                      <strong className="text-red">Check In (Entry)</strong>
-                    ) : (
-                      <strong className="text-navy">Check Out (Exit)</strong>
-                    )}
-                  </div>
-                  <span className="info-card-sub">Convenio Mart Attendance</span>
-                </div>
-              </div>
-
-              <div className="detail-location-section">
-                <div className="detail-location-header">
-                  <MapPin size={16} className="loc-icon" />
-                  <h4>Captured Geolocation Details</h4>
-                </div>
-
-                <div className="detail-coords-box">
-                  <div className="coord-field">
-                    <span className="coord-field-label">Latitude & Longitude</span>
-                    <span className="coord-field-value">
-                      {selectedRecord.location?.lat ? `${selectedRecord.location.lat}, ${selectedRecord.location.lng}` : 'GPS Data Not Available'}
+                <div className="receipt-person-details">
+                  <h3 className="receipt-person-name">{selectedRecord.employeeName}</h3>
+                  <div className="receipt-person-meta">
+                    <span className="receipt-role-badge">{selectedRecord.employeeRole || 'Staff'}</span>
+                    <span className="receipt-bullet">•</span>
+                    <span className="receipt-branch-name">
+                      <Store size={13} /> {selectedRecord.branchName || 'Convenio Mart'}
                     </span>
                   </div>
-                  {selectedRecord.location?.placeName && (
-                    <div className="coord-field">
-                      <span className="coord-field-label">Resolved Location / Area</span>
-                      <span className="coord-field-value place-text">
-                        {selectedRecord.location.placeName}
-                      </span>
-                    </div>
-                  )}
+                </div>
+              </div>
+
+              {/* Clean Summary Table */}
+              <div className="receipt-spec-list">
+                {/* Time Row */}
+                <div className="receipt-spec-item">
+                  <div className="receipt-spec-label">
+                    <Clock size={15} />
+                    <span>Punch Time</span>
+                  </div>
+                  <div className="receipt-spec-value">
+                    <strong className="receipt-time-strong">{selectedRecord.time || selectedRecord.shortTime}</strong>
+                  </div>
                 </div>
 
-                {selectedRecord.location?.lat && (
-                  <div className="detail-location-actions">
-                    <a 
-                      href={`https://www.google.com/maps?q=${selectedRecord.location.lat},${selectedRecord.location.lng}`}
-                      target="_blank" 
-                      rel="noreferrer" 
-                      className="btn-open-gmaps"
-                    >
-                      <MapPin size={15} />
-                      <span>Open Exact Pin in Google Maps</span>
-                      <ExternalLink size={14} />
-                    </a>
+                {/* Location Row */}
+                <div className="receipt-spec-item receipt-location-item">
+                  <div className="receipt-spec-label">
+                    <MapPin size={15} />
+                    <span>Captured Location</span>
                   </div>
-                )}
+                  <div className="receipt-spec-value receipt-location-value">
+                    <span className="receipt-place-title">
+                      {selectedRecord.location?.placeName || 'Store Location Captured'}
+                    </span>
+                    {selectedRecord.location?.lat && (
+                      <span className="receipt-gps-sub">
+                        GPS: {selectedRecord.location.lat}, {selectedRecord.location.lng}
+                      </span>
+                    )}
+                    {selectedRecord.location?.lat && (
+                      <a 
+                        href={`https://www.google.com/maps?q=${selectedRecord.location.lat},${selectedRecord.location.lng}`}
+                        target="_blank" 
+                        rel="noreferrer" 
+                        className="receipt-map-link"
+                      >
+                        <ExternalLink size={12} />
+                        <span>View on Google Maps</span>
+                      </a>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div className="detail-modal-footer">
-              <button 
-                className="btn-copy-record"
-                onClick={() => copyRecordDetails(selectedRecord)}
-              >
-                {copiedRecordId === selectedRecord.id ? (
-                  <>
-                    <Check size={16} color="#10b981" />
-                    <span>Copied!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy size={16} />
-                    <span>Copy Details</span>
-                  </>
-                )}
-              </button>
-              <button className="modal-close-btn" onClick={() => setSelectedRecord(null)}>
-                Close
-              </button>
+            {/* Modal Actions Footer */}
+            <div className="receipt-footer">
+              <span className="receipt-id-micro">{selectedRecord.id}</span>
+              <div className="receipt-footer-buttons">
+                <button 
+                  className="btn-receipt-copy"
+                  onClick={() => copyRecordDetails(selectedRecord)}
+                >
+                  {copiedRecordId === selectedRecord.id ? (
+                    <>
+                      <Check size={14} color="#10b981" />
+                      <span>Copied</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy size={14} />
+                      <span>Copy</span>
+                    </>
+                  )}
+                </button>
+                <button className="btn-receipt-close" onClick={() => setSelectedRecord(null)}>
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>
