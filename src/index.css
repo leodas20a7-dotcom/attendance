@@ -3507,5 +3507,44 @@ body {
   border-color: #cbd5e1;
 }
 
+/* ================= PORTAL FOOTER ================= */
+.portal-footer {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-size: 0.76rem;
+  color: var(--text-light);
+}
+
+.footer-copyright {
+  font-weight: 500;
+}
+
+.footer-dot {
+  color: #cbd5e1;
+}
+
+.footer-admin-link {
+  background: none;
+  border: none;
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.footer-admin-link:hover {
+  color: var(--brand-navy);
+  background: #f1f5f9;
+}
+
 
 

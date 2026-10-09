@@ -1128,6 +1128,18 @@ export default function App() {
                 </button>
               </div>
             </div>
+
+            <footer className="portal-footer">
+              <span className="footer-copyright">Convenio Marts Attendance</span>
+              <span className="footer-dot">•</span>
+              <button 
+                type="button" 
+                className="footer-admin-link" 
+                onClick={() => navigateTo('admin')}
+              >
+                Admin Portal
+              </button>
+            </footer>
           </div>
         </main>
       )}
