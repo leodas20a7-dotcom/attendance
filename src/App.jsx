@@ -1285,15 +1285,15 @@ export default function App() {
                 </div>
                 <div className="stat-card">
                   <span className="stat-label">Total Staff</span>
-                  <span className="stat-val text-red">{totalEmployeesCount}</span>
+                  <span className="stat-val text-navy">{totalEmployeesCount}</span>
                 </div>
                 <div className="stat-card">
                   <span className="stat-label">Today's Check Ins</span>
-                  <span className="stat-val text-green">{records.filter(r => r.type === 'in').length}</span>
+                  <span className="stat-val text-green">{records.filter(r => r.type === 'in' && isRecordToday(r)).length}</span>
                 </div>
                 <div className="stat-card">
                   <span className="stat-label">Total Attendance Logs</span>
-                  <span className="stat-val">{records.length}</span>
+                  <span className="stat-val text-navy">{records.length}</span>
                 </div>
               </div>
             </div>
@@ -1676,6 +1676,7 @@ export default function App() {
                               title="View Full Record"
                             >
                               <span>View Details</span>
+                              <ExternalLink size={11} />
                             </button>
                           </td>
                         </tr>
