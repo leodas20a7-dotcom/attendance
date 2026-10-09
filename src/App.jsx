@@ -76,8 +76,8 @@ export default function App() {
   // Admin sub-tab: 'branches' or 'logs'
   const [adminTab, setAdminTab] = useState('branches');
 
-  // Flash / Splash Loading Screen State
-  const [appLoading, setAppLoading] = useState(true);
+  // Flash / Splash Loading Screen State (disabled blocking delay for instant paint & high performance)
+  const [appLoading, setAppLoading] = useState(false);
   const [loadingFadingOut, setLoadingFadingOut] = useState(false);
 
   // Admin Authentication State (Username: hr@lordsandkings.co | Pwd: lak@2018)
@@ -229,18 +229,6 @@ export default function App() {
     initSupabase();
   }, []);
 
-  // Flash / Splash Loading Screen Timer (smooth fade-out)
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setLoadingFadingOut(true);
-      const closeTimer = setTimeout(() => {
-        setAppLoading(false);
-      }, 500);
-      return () => clearTimeout(closeTimer);
-    }, 1100);
-
-    return () => clearTimeout(timer);
-  }, []);
 
   const copySqlToClipboard = () => {
     navigator.clipboard.writeText(SUPABASE_SCHEMA_SQL);
@@ -934,10 +922,12 @@ export default function App() {
           onClick={handleLogoClick} 
           role="button" 
           tabIndex={0} 
+          aria-label="Convenio Mart Home"
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleLogoClick(); }}
           style={{ cursor: 'pointer' }}
           title="Convenio Mart"
         >
-          <svg className="logo-svg" viewBox="0 0 160 50" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <svg className="logo-svg" role="img" aria-label="Convenio Mart Logo" viewBox="0 0 160 50" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M4 14H18M2 20H15M6 26H17" stroke="#e11d24" strokeWidth="3" strokeLinecap="round"/>
             <path d="M19 12H35L33 28H21L19 12Z" fill="#e11d24"/>
             <circle cx="27" cy="20" r="4.5" fill="white"/>
@@ -967,6 +957,7 @@ export default function App() {
                   className="portal-logout-btn"
                   onClick={handleAdminLogout}
                   title="Sign out of Admin Portal"
+                  aria-label="Sign out of Admin Portal"
                 >
                   <LogOut size={15} />
                   <span>Logout</span>
@@ -981,6 +972,7 @@ export default function App() {
               className="history-nav-trigger-btn"
               onClick={() => setShowHistoryDrawer(true)}
               title="View Staff Check-In & Check-Out History"
+              aria-label="View Staff Check-In and Check-Out History"
             >
               <History size={16} className="history-icon" />
               <span>History</span>
