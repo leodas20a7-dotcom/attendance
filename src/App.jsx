@@ -1805,7 +1805,7 @@ export default function App() {
                     <div 
                       key={item.id} 
                       className="history-log-card"
-                      onClick={() => setSelectedRecord(item)}
+                      onClick={() => setSelectedRecord({ ...item, disablePhotoZoom: true })}
                       role="button"
                       tabIndex={0}
                       title="Click to view full attendance verification receipt"
@@ -2206,14 +2206,20 @@ export default function App() {
               {/* Employee Identity Hero */}
               <div className="receipt-person-row">
                 <div 
-                  className="receipt-avatar-wrapper"
-                  onClick={() => setViewingPhoto(selectedRecord)}
-                  title="Click to view full photo"
+                  className={`receipt-avatar-wrapper ${selectedRecord.disablePhotoZoom ? 'no-zoom' : ''}`}
+                  onClick={() => {
+                    if (!selectedRecord.disablePhotoZoom && selectedRecord.photo) {
+                      setViewingPhoto(selectedRecord);
+                    }
+                  }}
+                  title={selectedRecord.disablePhotoZoom ? selectedRecord.employeeName : "Click to view full photo"}
                 >
                   <img src={selectedRecord.photo} alt={selectedRecord.employeeName} className="receipt-avatar-img" />
-                  <div className="receipt-zoom-hint">
-                    <Eye size={16} />
-                  </div>
+                  {!selectedRecord.disablePhotoZoom && (
+                    <div className="receipt-zoom-hint">
+                      <Eye size={16} />
+                    </div>
+                  )}
                 </div>
                 <div className="receipt-person-details">
                   <h3 className="receipt-person-name">{selectedRecord.employeeName}</h3>

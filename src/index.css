@@ -2170,6 +2170,14 @@ body {
   transform: scale(1.05);
 }
 
+.receipt-avatar-wrapper.no-zoom {
+  cursor: default;
+}
+
+.receipt-avatar-wrapper.no-zoom:hover .receipt-avatar-img {
+  transform: none;
+}
+
 .receipt-zoom-hint {
   position: absolute;
   inset: 0;
