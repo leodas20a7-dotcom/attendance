@@ -1969,34 +1969,43 @@ export default function App() {
                       </div>
 
                       <div className="history-log-main">
-                        <div className="history-log-title-row">
+                        {/* Row 1: Employee Name & Action Pill */}
+                        <div className="history-log-header-row">
                           <strong className="history-log-name">{item.employeeName}</strong>
                           <div className={`history-action-pill ${item.type === 'in' ? 'pill-in' : 'pill-out'}`}>
                             {item.type === 'in' ? <LogIn size={11} /> : <LogOut size={11} />}
                             <span>{item.type === 'in' ? 'Check In' : 'Check Out'}</span>
                           </div>
                         </div>
+
+                        {/* Row 2: Branch Name & On-Site Badge */}
                         {item.branchName && (
-                          <span className="history-log-branch">
-                            <MapPin size={11} /> {item.branchName}
+                          <div className="history-log-branch-row">
+                            <span className="history-log-branch-name">
+                              <MapPin size={11} />
+                              <span>{item.branchName}</span>
+                            </span>
                             {item.geofenceVerified && (
                               <span className="history-on-site-tag" title="Verified within 50m of branch">
-                                • On-Site{item.distanceMeters != null ? ` (${item.distanceMeters}m)` : ''}
+                                <ShieldCheck size={11} />
+                                <span>On-Site{item.distanceMeters != null ? ` (${item.distanceMeters}m)` : ''}</span>
                               </span>
                             )}
-                          </span>
+                          </div>
                         )}
-                      </div>
 
-                      <div className="history-log-right">
-                        <div className="history-log-time">
-                          <Clock size={11} />
-                          <span>{item.time || item.shortTime}</span>
+                        {/* Row 3: Punch Time & Date */}
+                        <div className="history-log-meta-row">
+                          <span className="history-log-time-chip">
+                            <Clock size={11} />
+                            <span>{item.time || item.shortTime}</span>
+                          </span>
+                          <span className="history-meta-bullet">•</span>
+                          <span className="history-log-date-text">{item.date}</span>
                         </div>
-                        <span className="history-log-date">{item.date}</span>
                       </div>
 
-                      <ChevronRight size={15} className="history-log-chevron" />
+                      <ChevronRight size={16} className="history-log-chevron" />
                     </div>
                   ))
               )}
