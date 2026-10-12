@@ -24,8 +24,8 @@ export const DEFAULT_BRANCHES = [
     location: 'Ottiambakkam',
     pincode: '600130',
     address: 'Casa Grand - Sereno, Karanai Main Rd, Ottiambakkam, Chennai, Sonalur, Tamil Nadu 600130',
-    lat: 12.861552,
-    lng: 80.200746,
+    lat: 12.864146,
+    lng: 80.195549,
     geofenceRadiusMeters: 50,
     employees: [
       { id: 'emp-sereno-1', name: 'Akash' }
@@ -158,10 +158,10 @@ export function getStoredBranches() {
       return DEFAULT_BRANCHES;
     }
     if (Array.isArray(parsed) && parsed.length > 0) {
-      // Merge lat/lng and geofence info if not yet in stored branches
+      // Merge latest lat/lng and geofence info to keep coordinates updated
       const updated = parsed.map(branch => {
         const match = DEFAULT_BRANCHES.find(d => d.id === branch.id || d.name.toLowerCase() === branch.name?.toLowerCase());
-        if (match && (!branch.lat || !branch.lng)) {
+        if (match) {
           return {
             ...branch,
             lat: match.lat,
@@ -174,6 +174,7 @@ export function getStoredBranches() {
         }
         return branch;
       });
+      localStorage.setItem(STORAGE_KEY_BRANCHES, JSON.stringify(updated));
       return updated;
     }
     localStorage.setItem(STORAGE_KEY_BRANCHES, JSON.stringify(DEFAULT_BRANCHES));
