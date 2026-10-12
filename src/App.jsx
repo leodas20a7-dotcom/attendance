@@ -1035,7 +1035,7 @@ export default function App() {
                 onClick={() => navigateTo('attendance')}
               >
                 <ArrowLeft size={16} />
-                <span>Back to Attendance</span>
+                <span className="portal-back-label">Back to Attendance</span>
               </button>
               {isAdminAuthenticated && (
                 <button 
