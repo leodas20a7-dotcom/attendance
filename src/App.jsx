@@ -1405,7 +1405,8 @@ export default function App() {
                     onClick={() => setAdminTab('branches')}
                   >
                     <Building2 size={16} />
-                    <span>Branches & Staff</span>
+                    <span className="tab-label-full">Branches & Staff</span>
+                    <span className="tab-label-short">Branches</span>
                     <span className="tab-pill-counter">{branches.length}</span>
                   </button>
                   <button 
@@ -1414,7 +1415,8 @@ export default function App() {
                     onClick={() => setAdminTab('logs')}
                   >
                     <History size={16} />
-                    <span>Attendance Logs</span>
+                    <span className="tab-label-full">Attendance Logs</span>
+                    <span className="tab-label-short">Logs</span>
                     <span className="tab-pill-counter">{records.length}</span>
                   </button>
                 </div>
