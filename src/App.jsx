@@ -31,12 +31,20 @@ import {
   ChevronRight,
   Store,
   ShieldCheck,
+  ShieldAlert,
   Database,
   Cloud,
   Lock,
   Mail,
   EyeOff
 } from 'lucide-react';
+
+import { 
+  getCurrentDeviceLocation, 
+  findNearestBranch, 
+  formatDistance,
+  DEFAULT_GEOFENCE_RADIUS_METERS 
+} from './lib/geo';
 
 import { 
   DEFAULT_BRANCHES,
@@ -123,6 +131,12 @@ export default function App() {
   // Manual fallback name if needed
   const [customEmployeeName, setCustomEmployeeName] = useState('');
   const [formValidationMsg, setFormValidationMsg] = useState('');
+
+  // 50-Meter GPS Geofencing & Anti-Proxy Attendance State
+  // Status: 'checking' | 'in_range' | 'out_of_range' | 'denied' | 'unavailable'
+  const [geoStatus, setGeoStatus] = useState('checking');
+  const [geoData, setGeoData] = useState(null); // { nearestBranch, distanceMeters, isWithinGeofence, userLat, userLng, accuracy }
+  const [geoErrorMsg, setGeoErrorMsg] = useState('');
 
   // Attendance Records
   const [records, setRecords] = useState(() => {
@@ -284,6 +298,46 @@ export default function App() {
       }
     }
   }, [selectedBranchId, branches]);
+
+  // Geofence Location Evaluation Handler (Checks if user is within 50m of any branch)
+  const checkGeofenceLocation = async (customBranchesList) => {
+    setGeoStatus('checking');
+    setGeoErrorMsg('');
+    const branchList = customBranchesList || branches;
+
+    try {
+      const pos = await getCurrentDeviceLocation();
+      const evalResult = findNearestBranch(pos.lat, pos.lng, branchList);
+
+      setGeoData({
+        ...evalResult,
+        userLat: pos.lat,
+        userLng: pos.lng,
+        accuracy: pos.accuracy
+      });
+
+      if (evalResult.isWithinGeofence) {
+        setGeoStatus('in_range');
+        if (evalResult.nearestBranch) {
+          setSelectedBranchId(evalResult.nearestBranch.id);
+          localStorage.setItem(STORAGE_KEY_SELECTED_BRANCH, evalResult.nearestBranch.id);
+        }
+      } else {
+        setGeoStatus('out_of_range');
+      }
+    } catch (err) {
+      console.warn('Geofence check warning:', err);
+      const isDenied = err.code === 'PERMISSION_DENIED';
+      setGeoStatus(isDenied ? 'denied' : 'unavailable');
+      setGeoErrorMsg(err.message || 'Unable to detect store location');
+    }
+  };
+
+  useEffect(() => {
+    if (view === 'attendance') {
+      checkGeofenceLocation(branches);
+    }
+  }, [view]);
 
   // Handle URL navigation
   useEffect(() => {
@@ -618,6 +672,11 @@ export default function App() {
 
   // ================= ATTENDANCE CHECK IN / OUT ACTION =================
   const handleActionClick = (actionType) => {
+    if (geoStatus !== 'in_range') {
+      setFormValidationMsg('You must be within 50 meters of a Convenio Mart branch to mark attendance.');
+      return;
+    }
+
     if (!selectedBranchId) {
       setFormValidationMsg('Please select your Branch first.');
       return;
@@ -775,6 +834,9 @@ export default function App() {
     const activeEmpRole = currentFormEmployee?.role || 'Staff';
 
     const finishRecord = (locationData) => {
+      const isGeofenceOk = geoStatus === 'in_range';
+      const verifiedDistance = geoData?.distanceMeters != null ? geoData.distanceMeters : null;
+
       const newRecord = {
         id: 'REC-' + Date.now(),
         timestamp: now.getTime(),
@@ -786,6 +848,8 @@ export default function App() {
         time: formattedTime,
         shortTime,
         photo: capturedPhoto,
+        geofenceVerified: isGeofenceOk,
+        distanceMeters: verifiedDistance,
         location: locationData
       };
 
@@ -805,7 +869,9 @@ export default function App() {
         photo: capturedPhoto,
         name: activeEmpName,
         branch: activeBranchName,
-        role: activeEmpRole
+        role: activeEmpRole,
+        geofenceVerified: isGeofenceOk,
+        distanceMeters: verifiedDistance
       });
     };
 
@@ -849,7 +915,7 @@ export default function App() {
   // Export records to CSV
   const exportToCSV = () => {
     if (records.length === 0) return;
-    const headers = ['Record ID', 'Employee Name', 'Role', 'Branch Name', 'Action', 'Date', 'Time', 'Latitude', 'Longitude', 'Place Name', 'Google Maps URL'];
+    const headers = ['Record ID', 'Employee Name', 'Role', 'Branch Name', 'Action', 'Date', 'Time', 'Geofence Verified', 'Distance (Meters)', 'Latitude', 'Longitude', 'Place Name', 'Google Maps URL'];
     const rows = records.map((r) => [
       `"${r.id}"`,
       `"${r.employeeName}"`,
@@ -858,6 +924,8 @@ export default function App() {
       `"${r.type === 'in' ? 'Check In' : 'Check Out'}"`,
       `"${r.date}"`,
       `"${r.time || r.shortTime}"`,
+      `"${r.geofenceVerified ? 'Yes (On-Site)' : 'No'}"`,
+      `"${r.distanceMeters != null ? r.distanceMeters + 'm' : '-'}"`,
       `"${r.location?.lat ?? ''}"`,
       `"${r.location?.lng ?? ''}"`,
       `"${r.location?.placeName || ''}"`,
@@ -1008,155 +1076,207 @@ export default function App() {
           <div className="clean-card">
             <div className="clean-card-header">
               <h1 className="clean-card-title">Staff Attendance</h1>
-              <p className="clean-card-subtitle">Select your branch and name to check in or out</p>
+              <p className="clean-card-subtitle">
+                {geoStatus === 'checking'
+                  ? 'Verifying store presence...'
+                  : geoStatus === 'in_range'
+                  ? 'Store verified on-site. Select your name to mark attendance.'
+                  : 'Location verification required to prevent proxy attendance'}
+              </p>
             </div>
 
-            <div className="clean-form">
-              {/* Branch Selection */}
-              <div className="clean-field">
-                <label htmlFor="branch-select" className="clean-label">Branch</label>
-                <div className="clean-select-wrapper">
-                  <select
-                    id="branch-select"
-                    className="clean-select"
-                    value={selectedBranchId}
-                    onChange={(e) => {
-                      setSelectedBranchId(e.target.value);
-                      if (formValidationMsg) setFormValidationMsg('');
-                    }}
+            {/* 1. Checking Location Radar State */}
+            {geoStatus === 'checking' && (
+              <div className="geofence-checking-box">
+                <div className="geofence-radar-icon-wrap">
+                  <div className="geofence-radar-ping"></div>
+                  <Navigation size={22} />
+                </div>
+                <h3 className="geofence-checking-title">Verifying Store Location...</h3>
+                <p className="geofence-checking-sub">
+                  Checking your GPS position against Convenio Mart branches (50m perimeter).
+                </p>
+              </div>
+            )}
+
+            {/* 2. Blocked / Out of Range Anti-Proxy Screen */}
+            {geoStatus !== 'checking' && geoStatus !== 'in_range' && (
+              <div className="geofence-blocked-card">
+                <div className="geofence-blocked-icon-wrap">
+                  <ShieldAlert size={28} />
+                </div>
+                <h3 className="geofence-blocked-title">Outside Store Geofence</h3>
+                <p className="geofence-blocked-desc">
+                  {geoStatus === 'denied'
+                    ? 'Location permission was denied. Please allow location access in your browser to verify branch attendance.'
+                    : geoStatus === 'unavailable'
+                    ? (geoErrorMsg || 'GPS signal unavailable. Please ensure location is enabled on your device.')
+                    : 'Attendance can only be marked while physically present inside a Convenio Mart branch (50m radius).'}
+                </p>
+
+                {geoData?.nearestBranch && (
+                  <div className="geofence-nearest-box">
+                    <div className="geofence-nearest-left">
+                      <span className="geofence-nearest-label">Nearest Store</span>
+                      <span className="geofence-nearest-name">{geoData.nearestBranch.name}</span>
+                    </div>
+                    <span className="geofence-nearest-dist-tag">
+                      ~{formatDistance(geoData.distanceMeters)} away
+                    </span>
+                  </div>
+                )}
+
+                <div className="geofence-actions-row">
+                  <button 
+                    type="button" 
+                    className="geofence-retry-btn"
+                    onClick={() => checkGeofenceLocation(branches)}
                   >
-                    <option value="" disabled>Select Branch</option>
-                    {branches.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.name}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown className="clean-chevron" size={18} />
+                    <RefreshCw size={15} />
+                    <span>Refresh My Location</span>
+                  </button>
                 </div>
               </div>
+            )}
 
-              {/* Employee Selection */}
-              <div className="clean-field">
-                <label htmlFor="employee-select" className="clean-label">Employee Name</label>
-                {currentBranchEmployees.length > 0 ? (
-                  <div className="clean-select-wrapper">
-                    <select
-                      id="employee-select"
-                      className="clean-select"
-                      disabled={!selectedBranchId}
-                      value={selectedEmpId}
-                      onChange={(e) => {
-                        setSelectedEmpId(e.target.value);
-                        if (formValidationMsg) setFormValidationMsg('');
-                      }}
-                    >
-                      <option value="" disabled>
-                        {!selectedBranchId ? 'Select a branch first' : 'Select Employee'}
-                      </option>
-                      {currentBranchEmployees.map((emp) => (
-                        <option key={emp.id} value={emp.id}>
-                          {emp.name}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown className="clean-chevron" size={18} />
+            {/* 3. Verified On-Site Form (Shows Branch Name & Address, then asks Employee Name) */}
+            {geoStatus === 'in_range' && (
+              <div className="clean-form">
+                {/* Branch Name & Address Card */}
+                <div className="geofence-verified-card">
+                  <div className="geofence-verified-top">
+                    <span className="geofence-verified-pill">
+                      <span className="geofence-verified-dot"></span>
+                      <span>Verified On-Site</span>
+                    </span>
+                    <span className="geofence-distance-chip">
+                      {geoData?.distanceMeters != null ? `${geoData.distanceMeters}m away` : 'Within store (<50m)'}
+                    </span>
                   </div>
-                ) : (
-                  <input
-                    type="text"
-                    id="employee-select"
-                    placeholder="Enter Employee Name"
-                    value={customEmployeeName}
-                    onChange={(e) => setCustomEmployeeName(e.target.value)}
-                    className="clean-input"
-                  />
-                )}
-              </div>
 
-              {/* Smart Status Detection Banner */}
-              {activeFormEmpName && (
-                <div className={`smart-status-banner status-${latestTodayRecord?.type || 'none'}`}>
-                  <div className="status-banner-left">
-                    <span className={`status-indicator-dot dot-${latestTodayRecord?.type || 'none'}`}></span>
-                    <div className="status-text-group">
-                      <div className="status-primary-line">
-                        {latestTodayRecord?.type === 'in' ? (
-                          <>
-                            <strong className="status-title-in">Checked In Today</strong>
-                            <span className="status-time-chip">{latestTodayRecord.shortTime || latestTodayRecord.time}</span>
-                          </>
-                        ) : latestTodayRecord?.type === 'out' ? (
-                          <>
-                            <strong className="status-title-out">Checked Out Today</strong>
-                            <span className="status-time-chip">{latestTodayRecord.shortTime || latestTodayRecord.time}</span>
-                          </>
-                        ) : (
-                          <strong className="status-title-none">Not Checked In Today</strong>
-                        )}
+                  <div className="geofence-branch-info">
+                    <div className="geofence-branch-name">
+                      <Store size={18} color="#e11d24" />
+                      <span>{currentFormBranch?.name || geoData?.nearestBranch?.name || 'Convenio Mart'}</span>
+                    </div>
+                    <p className="geofence-branch-address">
+                      <MapPin size={14} />
+                      <span>{currentFormBranch?.address || geoData?.nearestBranch?.address || 'Branch Address'}</span>
+                    </p>
+                  </div>
+                </div>
+
+                {/* Employee Selection */}
+                <div className="clean-field">
+                  <label htmlFor="employee-select" className="clean-label">Employee Name</label>
+                  {currentBranchEmployees.length > 0 ? (
+                    <div className="clean-select-wrapper">
+                      <select
+                        id="employee-select"
+                        className="clean-select"
+                        value={selectedEmpId}
+                        onChange={(e) => {
+                          setSelectedEmpId(e.target.value);
+                          if (formValidationMsg) setFormValidationMsg('');
+                        }}
+                      >
+                        <option value="" disabled>Select Your Name</option>
+                        {currentBranchEmployees.map((emp) => (
+                          <option key={emp.id} value={emp.id}>
+                            {emp.name}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="clean-chevron" size={18} />
+                    </div>
+                  ) : (
+                    <input
+                      type="text"
+                      id="employee-select"
+                      placeholder="Enter Employee Name"
+                      value={customEmployeeName}
+                      onChange={(e) => setCustomEmployeeName(e.target.value)}
+                      className="clean-input"
+                    />
+                  )}
+                </div>
+
+                {/* Smart Status Detection Banner */}
+                {activeFormEmpName && (
+                  <div className={`smart-status-banner status-${latestTodayRecord?.type || 'none'}`}>
+                    <div className="status-banner-left">
+                      <span className={`status-indicator-dot dot-${latestTodayRecord?.type || 'none'}`}></span>
+                      <div className="status-text-group">
+                        <div className="status-primary-line">
+                          {latestTodayRecord?.type === 'in' ? (
+                            <>
+                              <strong className="status-title-in">Checked In Today</strong>
+                              <span className="status-time-chip">{latestTodayRecord.shortTime || latestTodayRecord.time}</span>
+                            </>
+                          ) : latestTodayRecord?.type === 'out' ? (
+                            <>
+                              <strong className="status-title-out">Checked Out Today</strong>
+                              <span className="status-time-chip">{latestTodayRecord.shortTime || latestTodayRecord.time}</span>
+                            </>
+                          ) : (
+                            <strong className="status-title-none">Not Checked In Today</strong>
+                          )}
+                        </div>
+                        <p className="status-subtext">
+                          {latestTodayRecord?.type === 'in' 
+                            ? 'Shift active • Tap Check Out when your shift ends'
+                            : latestTodayRecord?.type === 'out'
+                            ? 'Shift complete • Ready if starting a new shift'
+                            : 'Tap Check In to begin today\'s shift'}
+                        </p>
                       </div>
-                      <p className="status-subtext">
-                        {latestTodayRecord?.type === 'in' 
-                          ? 'Shift active • Tap Check Out when your shift ends'
-                          : latestTodayRecord?.type === 'out'
-                          ? 'Shift complete • Ready if starting a new shift'
-                          : 'Tap Check In to begin today\'s shift'}
-                      </p>
                     </div>
                   </div>
+                )}
+
+                {/* Validation Alert */}
+                {formValidationMsg && (
+                  <div className="clean-alert">
+                    <AlertCircle size={16} />
+                    <span>{formValidationMsg}</span>
+                  </div>
+                )}
+
+                {/* Action Buttons */}
+                <div className="clean-actions">
+                  <button 
+                    id="btn-check-in"
+                    className={`clean-btn clean-btn-in ${latestTodayRecord?.type === 'in' ? 'btn-dimmed-secondary' : ''}`}
+                    onClick={() => handleActionClick('in')}
+                    disabled={latestTodayRecord?.type === 'in'}
+                    title={latestTodayRecord?.type === 'in' ? `${activeFormEmpName || 'Employee'} is already checked in today` : 'Record Check In'}
+                  >
+                    <LogIn size={18} />
+                    <span>Check In</span>
+                    {(!latestTodayRecord || latestTodayRecord?.type === 'out') && (
+                      <span className="action-tag-pill">Start</span>
+                    )}
+                  </button>
+
+                  <button 
+                    id="btn-check-out"
+                    className={`clean-btn clean-btn-out ${latestTodayRecord?.type === 'in' ? 'btn-highlighted-action' : ''}`}
+                    onClick={() => handleActionClick('out')}
+                    disabled={latestTodayRecord?.type !== 'in'}
+                    title={latestTodayRecord?.type !== 'in' ? 'Check in required before checking out' : 'Record Check Out'}
+                  >
+                    <LogOut size={18} />
+                    <span>Check Out</span>
+                    {latestTodayRecord?.type === 'in' && (
+                      <span className="action-tag-pill tag-pill-checkout">End Shift</span>
+                    )}
+                  </button>
                 </div>
-              )}
-
-              {/* Validation Alert */}
-              {formValidationMsg && (
-                <div className="clean-alert">
-                  <AlertCircle size={16} />
-                  <span>{formValidationMsg}</span>
-                </div>
-              )}
-
-              {/* Action Buttons */}
-              <div className="clean-actions">
-                <button 
-                  id="btn-check-in"
-                  className={`clean-btn clean-btn-in ${latestTodayRecord?.type === 'in' ? 'btn-dimmed-secondary' : ''}`}
-                  onClick={() => handleActionClick('in')}
-                  disabled={latestTodayRecord?.type === 'in'}
-                  title={latestTodayRecord?.type === 'in' ? `${activeFormEmpName || 'Employee'} is already checked in today` : 'Record Check In'}
-                >
-                  <LogIn size={18} />
-                  <span>Check In</span>
-                  {(!latestTodayRecord || latestTodayRecord?.type === 'out') && (
-                    <span className="action-tag-pill">Start</span>
-                  )}
-                </button>
-
-                <button 
-                  id="btn-check-out"
-                  className={`clean-btn clean-btn-out ${latestTodayRecord?.type === 'in' ? 'btn-highlighted-action' : ''}`}
-                  onClick={() => handleActionClick('out')}
-                  disabled={latestTodayRecord?.type !== 'in'}
-                  title={latestTodayRecord?.type !== 'in' ? 'Check in required before checking out' : 'Record Check Out'}
-                >
-                  <LogOut size={18} />
-                  <span>Check Out</span>
-                  {latestTodayRecord?.type === 'in' && (
-                    <span className="action-tag-pill tag-pill-checkout">End Shift</span>
-                  )}
-                </button>
               </div>
-            </div>
+            )}
 
             <footer className="portal-footer">
               <span className="footer-copyright">Convenio Marts Attendance</span>
-              <span className="footer-dot">•</span>
-              <button 
-                type="button" 
-                className="footer-admin-link" 
-                onClick={() => navigateTo('admin')}
-              >
-                Admin Portal
-              </button>
             </footer>
           </div>
         </main>
@@ -1645,6 +1765,12 @@ export default function App() {
                             <div className="table-branch-cell">
                               <Building2 size={13} className="branch-icon" />
                               <span>{item.branchName || '-'}</span>
+                              {item.geofenceVerified && (
+                                <span className="table-geofence-chip" title="Verified within 50m of branch">
+                                  <ShieldCheck size={11} />
+                                  <span>On-Site{item.distanceMeters != null ? ` (${item.distanceMeters}m)` : ''}</span>
+                                </span>
+                              )}
                             </div>
                           </td>
 
@@ -1853,6 +1979,11 @@ export default function App() {
                         {item.branchName && (
                           <span className="history-log-branch">
                             <MapPin size={11} /> {item.branchName}
+                            {item.geofenceVerified && (
+                              <span className="history-on-site-tag" title="Verified within 50m of branch">
+                                • On-Site{item.distanceMeters != null ? ` (${item.distanceMeters}m)` : ''}
+                              </span>
+                            )}
                           </span>
                         )}
                       </div>
@@ -2165,6 +2296,12 @@ export default function App() {
                 <span className="success-branch-tag">
                   <Building2 size={12} /> {successData.branch}
                 </span>
+                {successData.geofenceVerified && (
+                  <span className="receipt-geofence-tag">
+                    <ShieldCheck size={13} color="#16a34a" />
+                    <span>Verified On-Site{successData.distanceMeters != null ? ` • ${successData.distanceMeters}m from store` : ''}</span>
+                  </span>
+                )}
               </div>
             </div>
 
@@ -2265,6 +2402,26 @@ export default function App() {
                   </div>
                   <div className="receipt-spec-value">
                     <strong className="receipt-time-strong">{selectedRecord.time || selectedRecord.shortTime}</strong>
+                  </div>
+                </div>
+
+                {/* Geofence Status Row */}
+                <div className="receipt-spec-item">
+                  <div className="receipt-spec-label">
+                    <ShieldCheck size={15} />
+                    <span>Geofence Status</span>
+                  </div>
+                  <div className="receipt-spec-value">
+                    {selectedRecord.geofenceVerified ? (
+                      <span className="receipt-verified-badge">
+                        <CheckCircle2 size={13} color="#16a34a" />
+                        <span>Verified On-Site{selectedRecord.distanceMeters != null ? ` (${selectedRecord.distanceMeters}m from store)` : ' (<50m)'}</span>
+                      </span>
+                    ) : (
+                      <span className="receipt-unverified-badge">
+                        <span>Standard Attendance</span>
+                      </span>
+                    )}
                   </div>
                 </div>
 
