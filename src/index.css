@@ -3071,6 +3071,14 @@ body {
   color: #991b1b;
 }
 
+.admin-auth-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.35rem;
+}
+
 .admin-auth-badge {
   display: inline-flex;
   align-items: center;
@@ -3082,8 +3090,30 @@ body {
   font-size: 0.75rem;
   color: var(--text-muted);
   font-weight: 600;
-  margin-top: 0.35rem;
 }
+
+.btn-purge-cache {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.65rem;
+  background: #ffffff;
+  border: 1px solid var(--border-light);
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-purge-cache:hover {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: var(--brand-red);
+}
+
 
 /* ================= HEADER HISTORY TRIGGER BUTTON ================= */
 .history-nav-trigger-btn {

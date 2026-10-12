@@ -66,6 +66,7 @@ import {
   removeEmployeeFromSupabase, 
   fetchAttendanceFromSupabase, 
   saveAttendanceToSupabase,
+  clearAllAttendanceFromSupabase,
   SUPABASE_SCHEMA_SQL
 } from './lib/supabase';
 
@@ -232,14 +233,17 @@ export default function App() {
             }
           }
 
-          // Try fetching attendance records from Supabase
+          // Fetch attendance records from Supabase
           const cloudRecords = await fetchAttendanceFromSupabase();
-          if (cloudRecords && cloudRecords.length > 0) {
-            setRecords(prev => {
-              const cloudIds = new Set(cloudRecords.map(r => r.id));
-              const uniqueLocal = prev.filter(r => !cloudIds.has(r.id));
-              return [...cloudRecords, ...uniqueLocal];
-            });
+          if (cloudRecords !== null) {
+            // Live Supabase database is single source of truth:
+            // Set state directly to cloud records so deleted data does not persist via local cache
+            setRecords(cloudRecords);
+            try {
+              localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(cloudRecords));
+            } catch (e) {
+              console.warn('Failed to cache cloud records:', e);
+            }
           }
         }
       } catch (err) {
@@ -942,11 +946,22 @@ export default function App() {
     document.body.removeChild(link);
   };
 
-  const clearAllRecords = () => {
-    if (window.confirm('Are you sure you want to clear all attendance logs? This cannot be undone.')) {
+  const clearAllRecords = async () => {
+    if (window.confirm('Are you sure you want to clear all attendance logs? This will delete logs from both the cloud database and local memory.')) {
       setRecords([]);
       localStorage.removeItem(STORAGE_KEY_RECORDS);
       setSelectedRecord(null);
+      if (supabaseStatus?.tablesReady) {
+        await clearAllAttendanceFromSupabase();
+      }
+    }
+  };
+
+  const handlePurgeCache = () => {
+    if (window.confirm('Clear all local browser cache memory and re-sync freshly from the live database?')) {
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.reload();
     }
   };
 
@@ -1277,6 +1292,15 @@ export default function App() {
 
             <footer className="portal-footer">
               <span className="footer-copyright">Convenio Marts Attendance</span>
+              <span className="footer-dot">•</span>
+              <button 
+                type="button" 
+                className="footer-admin-link"
+                onClick={handlePurgeCache}
+                title="Wipe local browser cache and reload fresh from database"
+              >
+                Clear Cache
+              </button>
             </footer>
           </div>
         </main>
@@ -1391,9 +1415,21 @@ export default function App() {
               <div className="admin-title-row">
                 <div className="admin-title-left">
                   <h1 className="admin-title">Admin Dashboard</h1>
-                  <div className="admin-auth-badge">
-                    <ShieldCheck size={13} color="#e11d24" />
-                    <span>hr@lordsandkings.co</span>
+                  <div className="admin-auth-row">
+                    <div className="admin-auth-badge">
+                      <ShieldCheck size={13} color="#e11d24" />
+                      <span>hr@lordsandkings.co</span>
+                    </div>
+                    <button 
+                      type="button" 
+                      id="btn-purge-cache"
+                      className="btn-purge-cache" 
+                      onClick={handlePurgeCache} 
+                      title="Clear all browser cached memory and re-sync fresh from database"
+                    >
+                      <RefreshCw size={11} />
+                      <span>Clear Cache</span>
+                    </button>
                   </div>
                 </div>
 

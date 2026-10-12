@@ -265,3 +265,20 @@ export async function saveAttendanceToSupabase(record) {
     return false;
   }
 }
+
+/**
+ * Clear all attendance records from Supabase
+ */
+export async function clearAllAttendanceFromSupabase() {
+  try {
+    const { error } = await supabase.from('attendance_records').delete().neq('id', 'placeholder-none');
+    if (error) {
+      console.warn('Failed to clear attendance from Supabase:', error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('Error clearing attendance from Supabase:', err);
+    return false;
+  }
+}
