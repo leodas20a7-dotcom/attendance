@@ -4414,10 +4414,7 @@ export default function App() {
             <div className="modal-header-row">
               <div className="modal-title-with-icon">
                 <Users size={20} className="modal-icon-brand" />
-                <div>
-                  <h3>Add Store Manager</h3>
-                  <p className="modal-desc-compact">Authorize a manager to handle staff transfers & attendance</p>
-                </div>
+                <h3>Add Store Manager</h3>
               </div>
               <button className="icon-close-btn" onClick={() => setShowAddManagerModal(false)}>
                 <X size={20} />
@@ -4486,26 +4483,6 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="form-group-clean">
-                <label htmlFor="new-mgr-email">Email Address (Optional)</label>
-                <input
-                  id="new-mgr-email"
-                  type="email"
-                  placeholder="e.g. karthik@convenio.in"
-                  value={newManagerEmail}
-                  onChange={(e) => setNewManagerEmail(e.target.value)}
-                />
-              </div>
-
-              <div className="manager-permission-preview">
-                <strong>Granted Permissions:</strong>
-                <ul>
-                  <li><Check size={13} color="#10b981" /> Can transfer employees between any Convenio Mart branches</li>
-                  <li><Check size={13} color="#10b981" /> Can view all employee attendance records, filter by date, and export CSV</li>
-                  <li><Lock size={13} color="#ef4444" /> Restricted: Cannot delete records, edit branches, or delete staff</li>
-                </ul>
-              </div>
-
               <div className="modal-actions-clean">
                 <button 
                   type="button" 
@@ -4520,7 +4497,7 @@ export default function App() {
                   className="btn-submit-clean"
                 >
                   <Plus size={16} />
-                  <span>Authorize & Add Manager</span>
+                  <span>Add Manager</span>
                 </button>
               </div>
             </form>
