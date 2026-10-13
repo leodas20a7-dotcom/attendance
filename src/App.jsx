@@ -19,6 +19,10 @@ import {
   Copy,
   Check,
   ArrowLeft,
+  ArrowRight,
+  ArrowRightLeft,
+  CheckSquare,
+  Square,
   FileSpreadsheet,
   Building2,
   History,
@@ -36,7 +40,10 @@ import {
   Cloud,
   Lock,
   Mail,
-  EyeOff
+  EyeOff,
+  Settings,
+  Activity,
+  FileText
 } from 'lucide-react';
 
 import { 
@@ -50,6 +57,8 @@ import {
   DEFAULT_BRANCHES,
   getStoredBranches, 
   saveStoredBranches, 
+  getStoredAdminLogs,
+  saveStoredAdminLogs,
   STORAGE_KEY_BRANCHES, 
   STORAGE_KEY_RECORDS,
   STORAGE_KEY_SELECTED_BRANCH,
@@ -196,7 +205,79 @@ export default function App() {
   const [newEmpRole, setNewEmpRole] = useState('');
 
   // Edit Employee Modal State
-  const [editingEmp, setEditingEmp] = useState(null); // { branchId, empId, name, role }
+  const [editingEmp, setEditingEmp] = useState(null); // { branchId, empId, name, role, targetBranchId }
+
+  // Staff Transfer States (Option C: Quick 1-click & Bulk Transfer)
+  const [transferModalStaff, setTransferModalStaff] = useState(null); // { emp, fromBranchId, toBranchId }
+  const [selectedEmpIds, setSelectedEmpIds] = useState([]); // Array of IDs selected for bulk actions
+  const [bulkTargetBranchId, setBulkTargetBranchId] = useState('');
+  const [transferToast, setTransferToast] = useState(null); // { message, type: 'success' | 'info' }
+
+  // Admin Security Password Confirmation for Delete
+  const [deleteModal, setDeleteModal] = useState(null); // { type, targetId, branchId, targetName, empCount }
+  const [deletePasswordInput, setDeletePasswordInput] = useState('');
+  const [deletePasswordError, setDeletePasswordError] = useState('');
+  const [showDeletePassword, setShowDeletePassword] = useState(false);
+
+  // Admin Action Audit Logs & Settings
+  const [adminLogs, setAdminLogs] = useState(() => {
+    const stored = getStoredAdminLogs();
+    if (stored && stored.length > 0) return stored;
+    return [
+      {
+        id: 'act-init',
+        timestamp: new Date().toISOString(),
+        dateStr: new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
+        timeStr: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
+        category: 'system',
+        title: 'Admin Action History initialized',
+        details: { note: 'Tracking all employee reassignments, additions, branch updates and security actions.' }
+      }
+    ];
+  });
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [adminLogSearch, setAdminLogSearch] = useState('');
+  const [adminLogCategoryFilter, setAdminLogCategoryFilter] = useState('all');
+
+  const logAdminAction = (category, title, details = {}) => {
+    const now = new Date();
+    const newLog = {
+      id: 'act-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
+      timestamp: now.toISOString(),
+      dateStr: now.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
+      timeStr: now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
+      category,
+      title,
+      details
+    };
+
+    setAdminLogs(prev => {
+      const updated = [newLog, ...prev].slice(0, 500);
+      saveStoredAdminLogs(updated);
+      return updated;
+    });
+  };
+
+  const exportAdminLogsToCSV = () => {
+    if (adminLogs.length === 0) return;
+    const headers = ['Log ID', 'Category', 'Action Title', 'Date', 'Time', 'Details'];
+    const rows = adminLogs.map(l => [
+      `"${l.id}"`,
+      `"${l.category}"`,
+      `"${l.title.replace(/"/g, '""')}"`,
+      `"${l.dateStr}"`,
+      `"${l.timeStr}"`,
+      `"${JSON.stringify(l.details).replace(/"/g, '""')}"`
+    ]);
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `Convenio_Admin_Action_History_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   // Admin search inside employee roster
   const [adminEmpSearch, setAdminEmpSearch] = useState('');
@@ -302,6 +383,12 @@ export default function App() {
       }
     }
   }, [selectedBranchId, branches]);
+
+  // Clear bulk staff selection when changing active branch in Admin
+  useEffect(() => {
+    setSelectedEmpIds([]);
+    setBulkTargetBranchId('');
+  }, [adminSelectedBranchId]);
 
   // Geofence Location Evaluation Handler (Checks if user is within 50m of any branch)
   const checkGeofenceLocation = async (customBranchesList) => {
@@ -543,6 +630,7 @@ export default function App() {
     const updated = [...branches, newBranch];
     setBranches(updated);
     syncBranchToSupabase(newBranch);
+    logAdminAction('add_branch', `Created new branch "${newBranch.name}" (${newBranch.code})`, { branchName: newBranch.name, code: newBranch.code });
     setNewBranchName('');
     setNewBranchCode('');
     setNewBranchAddress('');
@@ -572,28 +660,22 @@ export default function App() {
     }));
 
     syncBranchToSupabase(updatedBranch);
+    logAdminAction('edit_branch', `Updated branch details for "${updatedBranch.name}"`, { branchName: updatedBranch.name, code: updatedBranch.code });
     setEditingBranch(null);
   };
 
-  const handleDeleteBranch = (branchId) => {
+  const promptDeleteBranch = (branchId) => {
     const branchToDelete = branches.find(b => b.id === branchId);
     if (!branchToDelete) return;
-
-    const confirmMsg = branchToDelete.employees?.length > 0 
-      ? `Are you sure you want to delete "${branchToDelete.name}" and its ${branchToDelete.employees.length} employees?`
-      : `Are you sure you want to delete "${branchToDelete.name}"?`;
-
-    if (window.confirm(confirmMsg)) {
-      const updated = branches.filter(b => b.id !== branchId);
-      setBranches(updated);
-      removeBranchFromSupabase(branchId);
-      if (adminSelectedBranchId === branchId && updated.length > 0) {
-        setAdminSelectedBranchId(updated[0].id);
-      }
-      if (selectedBranchId === branchId && updated.length > 0) {
-        setSelectedBranchId(updated[0].id);
-      }
-    }
+    setDeletePasswordInput('');
+    setDeletePasswordError('');
+    setShowDeletePassword(false);
+    setDeleteModal({
+      type: 'branch',
+      targetId: branchId,
+      targetName: branchToDelete.name,
+      empCount: branchToDelete.employees?.length || 0
+    });
   };
 
   // ================= EMPLOYEE MANAGEMENT HANDLERS =================
@@ -618,13 +700,82 @@ export default function App() {
     }));
 
     syncEmployeeToSupabase(newEmp, adminSelectedBranchId);
+    const targetBranch = branches.find(b => b.id === adminSelectedBranchId);
+    logAdminAction('add_staff', `Added new staff member "${newEmp.name}" to ${targetBranch?.name || 'branch'}`, {
+      staffName: newEmp.name,
+      branchName: targetBranch?.name,
+      role: newEmp.role || 'Staff Member'
+    });
     setNewEmpName('');
     setNewEmpRole('');
+  };
+
+  // ================= STAFF BRANCH TRANSFER HANDLER (SINGLE & BULK) =================
+  const handleTransferEmployees = (empIds, fromBranchId, toBranchId) => {
+    if (!empIds || empIds.length === 0 || !fromBranchId || !toBranchId || fromBranchId === toBranchId) return;
+
+    const fromBranch = branches.find(b => b.id === fromBranchId);
+    const toBranch = branches.find(b => b.id === toBranchId);
+    if (!fromBranch || !toBranch) return;
+
+    const employeesToMove = (fromBranch.employees || []).filter(e => empIds.includes(e.id));
+    if (employeesToMove.length === 0) return;
+
+    setBranches(prev => prev.map(b => {
+      if (b.id === fromBranchId) {
+        return {
+          ...b,
+          employees: (b.employees || []).filter(e => !empIds.includes(e.id))
+        };
+      }
+      if (b.id === toBranchId) {
+        return {
+          ...b,
+          employees: [...(b.employees || []), ...employeesToMove]
+        };
+      }
+      return b;
+    }));
+
+    // Sync each transferred employee to Supabase under target branch
+    employeesToMove.forEach(emp => {
+      syncEmployeeToSupabase(emp, toBranchId);
+    });
+
+    const label = employeesToMove.length === 1 
+      ? `"${employeesToMove[0].name}"` 
+      : `${employeesToMove.length} staff members`;
+
+    logAdminAction(
+      'transfer',
+      employeesToMove.length === 1
+        ? `Transferred staff member "${employeesToMove[0].name}" from ${fromBranch.name} to ${toBranch.name}`
+        : `Bulk transferred ${employeesToMove.length} staff members from ${fromBranch.name} to ${toBranch.name}`,
+      {
+        count: employeesToMove.length,
+        staffNames: employeesToMove.map(e => e.name),
+        fromBranch: fromBranch.name,
+        toBranch: toBranch.name
+      }
+    );
+
+    setTransferToast({
+      message: `${label} transferred to ${toBranch.name}.`,
+      type: 'success'
+    });
+    setTimeout(() => setTransferToast(null), 4500);
+
+    setSelectedEmpIds([]);
+    setBulkTargetBranchId('');
+    setTransferModalStaff(null);
   };
 
   const handleUpdateEmployee = (e) => {
     e.preventDefault();
     if (!editingEmp || !editingEmp.name.trim()) return;
+
+    const targetBranchId = editingEmp.targetBranchId || editingEmp.branchId;
+    const isBranchChanged = targetBranchId !== editingEmp.branchId;
 
     const updatedEmp = {
       id: editingEmp.empId,
@@ -633,45 +784,175 @@ export default function App() {
     };
 
     setBranches(prev => prev.map(b => {
-      if (b.id === editingEmp.branchId) {
-        return {
-          ...b,
-          employees: (b.employees || []).map(emp => {
-            if (emp.id === editingEmp.empId) {
-              return {
-                ...emp,
-                ...updatedEmp
-              };
-            }
-            return emp;
-          })
-        };
+      if (isBranchChanged) {
+        if (b.id === editingEmp.branchId) {
+          return {
+            ...b,
+            employees: (b.employees || []).filter(emp => emp.id !== editingEmp.empId)
+          };
+        }
+        if (b.id === targetBranchId) {
+          return {
+            ...b,
+            employees: [...(b.employees || []), updatedEmp]
+          };
+        }
+        return b;
+      } else {
+        if (b.id === editingEmp.branchId) {
+          return {
+            ...b,
+            employees: (b.employees || []).map(emp => {
+              if (emp.id === editingEmp.empId) {
+                return {
+                  ...emp,
+                  ...updatedEmp
+                };
+              }
+              return emp;
+            })
+          };
+        }
+        return b;
       }
-      return b;
     }));
 
-    syncEmployeeToSupabase(updatedEmp, editingEmp.branchId);
+    syncEmployeeToSupabase(updatedEmp, targetBranchId);
+
+    if (isBranchChanged) {
+      const fromBranch = branches.find(b => b.id === editingEmp.branchId);
+      const toBranch = branches.find(b => b.id === targetBranchId);
+      logAdminAction('transfer', `Transferred & updated "${updatedEmp.name}" from ${fromBranch?.name || 'old branch'} to ${toBranch?.name || 'new branch'}`, {
+        staffName: updatedEmp.name,
+        fromBranch: fromBranch?.name,
+        toBranch: toBranch?.name
+      });
+      setTransferToast({
+        message: `"${updatedEmp.name}" updated & reassigned to ${toBranch?.name || 'new branch'}.`,
+        type: 'success'
+      });
+      setTimeout(() => setTransferToast(null), 4500);
+    } else {
+      logAdminAction('edit_staff', `Updated staff details for "${updatedEmp.name}"`, {
+        staffName: updatedEmp.name
+      });
+    }
+
     setEditingEmp(null);
   };
 
-  const handleDeleteEmployee = (branchId, empId) => {
-    if (window.confirm('Are you sure you want to remove this employee?')) {
+  const promptDeleteEmployee = (branchId, emp) => {
+    const branch = branches.find(b => b.id === branchId);
+    setDeletePasswordInput('');
+    setDeletePasswordError('');
+    setShowDeletePassword(false);
+    setDeleteModal({
+      type: 'employee',
+      branchId,
+      targetId: emp.id,
+      targetName: emp.name,
+      branchName: branch?.name || 'this branch'
+    });
+  };
+
+  const promptClearAllRecords = () => {
+    if (records.length === 0) return;
+    setDeletePasswordInput('');
+    setDeletePasswordError('');
+    setShowDeletePassword(false);
+    setDeleteModal({
+      type: 'logs',
+      targetName: 'All Attendance Logs',
+      count: records.length
+    });
+  };
+
+  const handleConfirmDelete = (e) => {
+    if (e) e.preventDefault();
+    if (!deleteModal) return;
+
+    if (deletePasswordInput !== 'lak@2018') {
+      setDeletePasswordError('Incorrect admin password. Please try again.');
+      return;
+    }
+
+    if (deleteModal.type === 'employee') {
+      const { branchId, targetId, targetName } = deleteModal;
       setBranches(prev => prev.map(b => {
         if (b.id === branchId) {
           return {
             ...b,
-            employees: (b.employees || []).filter(emp => emp.id !== empId)
+            employees: (b.employees || []).filter(emp => emp.id !== targetId)
           };
         }
         return b;
       }));
 
-      removeEmployeeFromSupabase(empId);
+      removeEmployeeFromSupabase(targetId);
 
-      if (selectedEmpId === empId) {
+      if (selectedEmpId === targetId) {
         setSelectedEmpId('');
       }
+      setSelectedEmpIds(prev => prev.filter(id => id !== targetId));
+
+      logAdminAction('delete_staff', `Deleted staff member "${targetName}" from ${deleteModal.branchName}`, {
+        staffName: targetName,
+        branchName: deleteModal.branchName
+      });
+
+      setTransferToast({
+        message: `Staff member "${targetName}" deleted successfully.`,
+        type: 'success'
+      });
+      setTimeout(() => setTransferToast(null), 4000);
+    } else if (deleteModal.type === 'branch') {
+      const { targetId, targetName } = deleteModal;
+      const updated = branches.filter(b => b.id !== targetId);
+      setBranches(updated);
+      removeBranchFromSupabase(targetId);
+
+      if (adminSelectedBranchId === targetId && updated.length > 0) {
+        setAdminSelectedBranchId(updated[0].id);
+      }
+      if (selectedBranchId === targetId && updated.length > 0) {
+        setSelectedBranchId(updated[0].id);
+      }
+
+      logAdminAction('delete_branch', `Deleted branch "${targetName}" and its staff`, {
+        branchName: targetName
+      });
+
+      setTransferToast({
+        message: `Branch "${targetName}" deleted successfully.`,
+        type: 'success'
+      });
+      setTimeout(() => setTransferToast(null), 4000);
+    } else if (deleteModal.type === 'logs') {
+      setRecords([]);
+      try {
+        localStorage.removeItem(STORAGE_KEY_RECORDS);
+      } catch (err) {
+        console.warn('Failed to clear records:', err);
+      }
+      setSelectedRecord(null);
+      if (supabaseStatus?.tablesReady) {
+        clearAllAttendanceFromSupabase();
+      }
+
+      logAdminAction('clear_logs', 'Cleared all attendance logs from system', {
+        count: records.length
+      });
+
+      setTransferToast({
+        message: 'All attendance records successfully cleared.',
+        type: 'success'
+      });
+      setTimeout(() => setTransferToast(null), 4000);
     }
+
+    setDeleteModal(null);
+    setDeletePasswordInput('');
+    setDeletePasswordError('');
   };
 
   // ================= ATTENDANCE CHECK IN / OUT ACTION =================
@@ -1043,7 +1324,19 @@ export default function App() {
         {/* Dynamic Navigation: Admin tools on admin view; Sleek History button on attendance view */}
         {view === 'admin' ? (
           <div className="nav-actions">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <div className="admin-header-nav-actions">
+              {isAdminAuthenticated && (
+                <button 
+                  id="header-settings-btn"
+                  className="header-settings-icon-btn"
+                  onClick={() => setShowSettingsModal(true)}
+                  title="Admin Settings & Action History"
+                  aria-label="Admin Settings & Action History"
+                >
+                  <Settings size={18} />
+                  {adminLogs.length > 0 && <span className="header-settings-dot" />}
+                </button>
+              )}
               <button 
                 id="nav-back-to-attendance-btn"
                 className="portal-back-btn"
@@ -1061,7 +1354,7 @@ export default function App() {
                   aria-label="Sign out of Admin Portal"
                 >
                   <LogOut size={15} />
-                  <span>Logout</span>
+                  <span className="portal-logout-label">Logout</span>
                 </button>
               )}
             </div>
@@ -1410,6 +1703,23 @@ export default function App() {
           </main>
         ) : (
           <main className="admin-container">
+            {/* Transfer & Action Feedback Toast */}
+            {transferToast && (
+              <div className={`admin-feedback-toast toast-${transferToast.type}`}>
+                <div className="toast-left">
+                  <CheckCircle2 size={17} className="toast-icon-check" />
+                  <span>{transferToast.message}</span>
+                </div>
+                <button 
+                  type="button" 
+                  className="toast-close-btn" 
+                  onClick={() => setTransferToast(null)}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
+
             {/* Admin Header with Sub-tabs */}
             <div className="admin-header-card">
               <div className="admin-title-row">
@@ -1540,7 +1850,7 @@ export default function App() {
                             <button 
                               className="btn-icon-delete"
                               title="Delete Branch"
-                              onClick={() => handleDeleteBranch(b.id)}
+                              onClick={() => promptDeleteBranch(b.id)}
                             >
                               <Trash2 size={14} />
                             </button>
@@ -1621,42 +1931,122 @@ export default function App() {
                       ) : (
                         currentAdminBranch.employees
                           .filter(emp => !adminEmpSearch || emp.name.toLowerCase().includes(adminEmpSearch.toLowerCase()) || (emp.role && emp.role.toLowerCase().includes(adminEmpSearch.toLowerCase())))
-                          .map((emp) => (
-                            <div key={emp.id} className="employee-roster-item">
-                              <div className="emp-item-left">
-                                <div className="emp-avatar-bubble">
-                                  {emp.name.charAt(0).toUpperCase()}
-                                </div>
-                                <div className="emp-item-info">
-                                  <strong className="emp-item-name">{emp.name}</strong>
-                                </div>
-                              </div>
+                          .map((emp) => {
+                            const isChecked = selectedEmpIds.includes(emp.id);
+                            const otherBranches = branches.filter(b => b.id !== currentAdminBranch.id);
 
-                              <div className="emp-item-actions">
-                                <button 
-                                  className="btn-icon-edit"
-                                  title="Edit Employee Name"
-                                  onClick={() => setEditingEmp({
-                                    branchId: currentAdminBranch.id,
-                                    empId: emp.id,
-                                    name: emp.name,
-                                    role: emp.role || ''
-                                  })}
-                                >
-                                  <Pencil size={14} />
-                                </button>
-                                <button 
-                                  className="btn-icon-delete"
-                                  title="Remove Employee"
-                                  onClick={() => handleDeleteEmployee(currentAdminBranch.id, emp.id)}
-                                >
-                                  <Trash2 size={14} />
-                                </button>
+                            return (
+                              <div key={emp.id} className={`employee-roster-item ${isChecked ? 'emp-item-selected' : ''}`}>
+                                <div className="emp-item-left">
+                                  <button 
+                                    type="button"
+                                    className={`emp-checkbox-btn ${isChecked ? 'is-checked' : ''}`}
+                                    onClick={() => {
+                                      setSelectedEmpIds(prev => 
+                                        prev.includes(emp.id) ? prev.filter(id => id !== emp.id) : [...prev, emp.id]
+                                      );
+                                    }}
+                                    title={isChecked ? 'Deselect staff' : 'Select for bulk transfer'}
+                                  >
+                                    {isChecked ? <CheckSquare size={17} className="check-icon-active" /> : <Square size={17} className="check-icon-idle" />}
+                                  </button>
+
+                                  <div className="emp-avatar-bubble">
+                                    {emp.name.charAt(0).toUpperCase()}
+                                  </div>
+                                  <div className="emp-item-info">
+                                    <strong className="emp-item-name">{emp.name}</strong>
+                                    {emp.role && <span className="emp-item-role">{emp.role}</span>}
+                                  </div>
+                                </div>
+
+                                <div className="emp-item-actions">
+                                  <button 
+                                    type="button"
+                                    className="btn-icon-transfer"
+                                    title="Transfer to Another Branch"
+                                    onClick={() => setTransferModalStaff({
+                                      emp,
+                                      fromBranchId: currentAdminBranch.id,
+                                      toBranchId: otherBranches[0]?.id || ''
+                                    })}
+                                  >
+                                    <ArrowRightLeft size={14} />
+                                  </button>
+                                  <button 
+                                    type="button"
+                                    className="btn-icon-edit"
+                                    title="Edit Employee & Branch"
+                                    onClick={() => setEditingEmp({
+                                      branchId: currentAdminBranch.id,
+                                      empId: emp.id,
+                                      name: emp.name,
+                                      role: emp.role || '',
+                                      targetBranchId: currentAdminBranch.id
+                                    })}
+                                  >
+                                    <Pencil size={14} />
+                                  </button>
+                                  <button 
+                                    type="button"
+                                    className="btn-icon-delete"
+                                    title="Remove Employee"
+                                    onClick={() => promptDeleteEmployee(currentAdminBranch.id, emp)}
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
                               </div>
-                            </div>
-                          ))
+                            );
+                          })
                       )}
                     </div>
+
+                    {/* Bulk Selection Floating Action Bar */}
+                    {selectedEmpIds.length > 0 && (
+                      <div className="bulk-transfer-dock">
+                        <div className="bulk-dock-left">
+                          <span className="bulk-badge">
+                            <Users size={14} />
+                            <strong>{selectedEmpIds.length}</strong> {selectedEmpIds.length === 1 ? 'staff member' : 'staff members'} selected
+                          </span>
+                          <button 
+                            type="button"
+                            className="btn-bulk-cancel"
+                            onClick={() => setSelectedEmpIds([])}
+                          >
+                            Deselect
+                          </button>
+                        </div>
+
+                        <div className="bulk-dock-right">
+                          <span className="dock-prompt">Move to:</span>
+                          <select 
+                            className="bulk-branch-select"
+                            value={bulkTargetBranchId}
+                            onChange={(e) => setBulkTargetBranchId(e.target.value)}
+                          >
+                            <option value="">-- Choose destination branch --</option>
+                            {branches
+                              .filter(b => b.id !== currentAdminBranch.id)
+                              .map(b => (
+                                <option key={b.id} value={b.id}>
+                                  {b.name} ({b.employees?.length || 0} staff)
+                                </option>
+                              ))}
+                          </select>
+                          <button 
+                            type="button"
+                            className="btn-bulk-execute"
+                            disabled={!bulkTargetBranchId}
+                            onClick={() => handleTransferEmployees(selectedEmpIds, currentAdminBranch.id, bulkTargetBranchId)}
+                          >
+                            <ArrowRightLeft size={15} />
+                            <span>Transfer Now</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </>
                 ) : (
                   <div className="empty-sub-state">
@@ -1725,7 +2115,7 @@ export default function App() {
                       <button 
                         id="clear-records-btn" 
                         className="btn-danger-clear" 
-                        onClick={clearAllRecords}
+                        onClick={promptClearAllRecords}
                         title="Clear all logs"
                       >
                         <Trash2 size={16} />
@@ -2155,7 +2545,7 @@ export default function App() {
             <div className="modal-header-row">
               <div className="modal-title-with-icon">
                 <Pencil size={20} className="modal-icon-brand" />
-                <h3>Edit Employee</h3>
+                <h3>Edit Employee Details</h3>
               </div>
               <button className="icon-close-btn" onClick={() => setEditingEmp(null)}>
                 <X size={20} />
@@ -2175,16 +2565,466 @@ export default function App() {
                 />
               </div>
 
+              <div className="form-group">
+                <label htmlFor="edit-emp-branch">Assigned Branch Location *</label>
+                <select
+                  id="edit-emp-branch"
+                  className="modal-select-input"
+                  value={editingEmp.targetBranchId || editingEmp.branchId}
+                  onChange={(e) => setEditingEmp({ ...editingEmp, targetBranchId: e.target.value })}
+                >
+                  {branches.map(b => (
+                    <option key={b.id} value={b.id}>
+                      {b.name} {b.id === editingEmp.branchId ? '(Current Branch)' : ''}
+                    </option>
+                  ))}
+                </select>
+                {editingEmp.targetBranchId && editingEmp.targetBranchId !== editingEmp.branchId && (
+                  <span className="transfer-hint-badge">
+                    <ArrowRightLeft size={13} />
+                    <span>Employee will be transferred to <strong>{branches.find(b => b.id === editingEmp.targetBranchId)?.name}</strong></span>
+                  </span>
+                )}
+              </div>
+
               <div className="modal-form-actions">
                 <button type="button" className="btn-cancel" onClick={() => setEditingEmp(null)}>
                   Cancel
                 </button>
                 <button type="submit" className="btn-save-primary">
                   <Check size={16} />
-                  <span>Save Employee</span>
+                  <span>Save Changes</span>
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL: QUICK TRANSFER STAFF ================= */}
+      {transferModalStaff && (
+        <div className="modal-overlay" onClick={() => setTransferModalStaff(null)}>
+          <div className="modal-content modal-form transfer-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header-row">
+              <div className="modal-title-with-icon">
+                <ArrowRightLeft size={20} className="modal-icon-brand brand-blue-icon" />
+                <h3>Transfer Staff Member</h3>
+              </div>
+              <button className="icon-close-btn" onClick={() => setTransferModalStaff(null)}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <form 
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleTransferEmployees(
+                  [transferModalStaff.emp.id], 
+                  transferModalStaff.fromBranchId, 
+                  transferModalStaff.toBranchId
+                );
+              }} 
+              className="modal-form-body"
+            >
+              {/* Employee Summary Card */}
+              <div className="transfer-staff-summary">
+                <div className="emp-avatar-bubble avatar-large">
+                  {transferModalStaff.emp.name.charAt(0).toUpperCase()}
+                </div>
+                <div className="transfer-staff-meta">
+                  <h4 className="transfer-staff-name">{transferModalStaff.emp.name}</h4>
+                  <span className="transfer-staff-role">{transferModalStaff.emp.role || 'Staff Member'}</span>
+                </div>
+              </div>
+
+              {/* Visual Branch Movement Diagram */}
+              <div className="transfer-route-box">
+                <div className="route-node">
+                  <span className="route-pill-label">CURRENT BRANCH</span>
+                  <div className="route-branch-name">
+                    <Store size={14} />
+                    <span>{branches.find(b => b.id === transferModalStaff.fromBranchId)?.name || 'Current Branch'}</span>
+                  </div>
+                </div>
+
+                <div className="route-flow-arrow">
+                  <ArrowRight size={20} />
+                </div>
+
+                <div className="route-node destination">
+                  <span className="route-pill-label dest-label">NEW DESTINATION</span>
+                  <div className="route-branch-name dest-name">
+                    <Store size={14} />
+                    <span>{branches.find(b => b.id === transferModalStaff.toBranchId)?.name || 'Select Branch'}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Destination Branch Picker */}
+              <div className="form-group">
+                <label htmlFor="transfer-select-target">Transfer To Which Branch? *</label>
+                <select
+                  id="transfer-select-target"
+                  className="modal-select-input"
+                  required
+                  value={transferModalStaff.toBranchId}
+                  onChange={(e) => setTransferModalStaff({ ...transferModalStaff, toBranchId: e.target.value })}
+                >
+                  <option value="" disabled>-- Select destination branch --</option>
+                  {branches
+                    .filter(b => b.id !== transferModalStaff.fromBranchId)
+                    .map(b => (
+                      <option key={b.id} value={b.id}>
+                        {b.name} ({b.employees?.length || 0} staff)
+                      </option>
+                    ))}
+                </select>
+                <p className="transfer-explanation-note">
+                  Once transferred, this employee belongs to the new branch and will immediately appear in that branch's daily check-in roster.
+                </p>
+              </div>
+
+              <div className="modal-form-actions">
+                <button 
+                  type="button" 
+                  className="btn-cancel" 
+                  onClick={() => setTransferModalStaff(null)}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  className="btn-save-primary btn-confirm-transfer"
+                  disabled={!transferModalStaff.toBranchId || transferModalStaff.toBranchId === transferModalStaff.fromBranchId}
+                >
+                  <ArrowRightLeft size={16} />
+                  <span>Transfer Employee</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL: SECURE DELETE CONFIRMATION (ADMIN PASSWORD) ================= */}
+      {deleteModal && (
+        <div className="modal-overlay" onClick={() => setDeleteModal(null)}>
+          <div className="modal-content modal-form secure-delete-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header-row delete-header-row">
+              <div className="modal-title-with-icon">
+                <div className="delete-shield-icon-box">
+                  <ShieldAlert size={20} className="modal-icon-danger" />
+                </div>
+                <div>
+                  <h3 className="delete-modal-title">Security Authorization</h3>
+                  <span className="delete-modal-subtitle">Admin Password Required</span>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                className="icon-close-btn" 
+                onClick={() => setDeleteModal(null)}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmDelete} className="modal-form-body delete-modal-body">
+              {/* Target Warning Card */}
+              <div className="delete-target-card">
+                <div className="delete-target-badge">
+                  <Trash2 size={13} />
+                  <span>ACTION: PERMANENT DELETE</span>
+                </div>
+                <div className="delete-target-detail">
+                  {deleteModal.type === 'employee' && (
+                    <>
+                      <strong className="delete-target-title">{deleteModal.targetName}</strong>
+                      <span className="sub-target-info">from {deleteModal.branchName}</span>
+                    </>
+                  )}
+                  {deleteModal.type === 'branch' && (
+                    <>
+                      <strong className="delete-target-title">{deleteModal.targetName}</strong>
+                      <span className="sub-target-info">Includes {deleteModal.empCount} registered staff members</span>
+                    </>
+                  )}
+                  {deleteModal.type === 'logs' && (
+                    <>
+                      <strong className="delete-target-title">All Attendance Logs</strong>
+                      <span className="sub-target-info">{deleteModal.count} attendance logs will be cleared</span>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Password Input Group */}
+              <div className="form-group delete-password-group">
+                <label htmlFor="delete-admin-password-input">
+                  Enter Admin Password to Authorize *
+                </label>
+                <div className="delete-password-input-wrapper">
+                  <Lock size={16} className="delete-lock-icon" />
+                  <input
+                    id="delete-admin-password-input"
+                    type={showDeletePassword ? 'text' : 'password'}
+                    required
+                    placeholder="Enter admin password..."
+                    value={deletePasswordInput}
+                    onChange={(e) => {
+                      setDeletePasswordInput(e.target.value);
+                      if (deletePasswordError) setDeletePasswordError('');
+                    }}
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    className="btn-toggle-delete-eye"
+                    onClick={() => setShowDeletePassword(!showDeletePassword)}
+                    tabIndex="-1"
+                  >
+                    {showDeletePassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
+                
+                {deletePasswordError && (
+                  <div className="delete-error-pill">
+                    <AlertCircle size={13} />
+                    <span>{deletePasswordError}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="modal-form-actions delete-modal-actions">
+                <button 
+                  type="button" 
+                  className="btn-cancel" 
+                  onClick={() => setDeleteModal(null)}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  className="btn-danger-confirm-delete"
+                  disabled={!deletePasswordInput.trim()}
+                >
+                  <Trash2 size={15} />
+                  <span>Confirm Delete</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL: ADMIN SETTINGS & ACTION HISTORY AUDIT TRAIL ================= */}
+      {showSettingsModal && (
+        <div className="modal-overlay" onClick={() => setShowSettingsModal(false)}>
+          <div className="modal-content modal-form settings-history-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header-row settings-header-row">
+              <div className="modal-title-with-icon">
+                <div className="settings-header-icon-box">
+                  <Settings size={20} className="modal-icon-settings" />
+                </div>
+                <div>
+                  <h3 className="settings-modal-title">Admin Settings & History</h3>
+                  <p className="settings-modal-subtitle">
+                    Audit trail of all administrative actions, branch changes & staff updates
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                className="icon-close-btn" 
+                onClick={() => setShowSettingsModal(false)}
+                title="Close settings"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Admin Profile & Quick Info Strip */}
+            <div className="settings-info-strip">
+              <div className="strip-item">
+                <ShieldCheck size={14} className="strip-icon-red" />
+                <span className="strip-label">Account:</span>
+                <strong className="strip-val">hr@lordsandkings.co</strong>
+              </div>
+              <div className="strip-item">
+                <Activity size={14} className="strip-icon-blue" />
+                <span className="strip-label">Logged Actions:</span>
+                <strong className="strip-val text-blue">{adminLogs.length}</strong>
+              </div>
+              <button 
+                type="button" 
+                className="btn-export-admin-logs" 
+                onClick={exportAdminLogsToCSV}
+                title="Download CSV of all admin actions"
+              >
+                <FileSpreadsheet size={13} />
+                <span>Export Audit CSV</span>
+              </button>
+            </div>
+
+            {/* Filter & Search Bar */}
+            <div className="settings-toolbar">
+              <div className="settings-search-wrapper">
+                <Search size={15} color="#94a3b8" />
+                <input 
+                  type="text" 
+                  placeholder="Filter logs by name, branch, action..."
+                  value={adminLogSearch}
+                  onChange={(e) => setAdminLogSearch(e.target.value)}
+                  className="settings-search-input"
+                />
+                {adminLogSearch && (
+                  <button className="clear-search-btn" onClick={() => setAdminLogSearch('')}>
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+
+              <div className="settings-filter-pills">
+                {[
+                  { id: 'all', label: 'All', count: adminLogs.length },
+                  { id: 'transfer', label: 'Transfers', count: adminLogs.filter(l => l.category === 'transfer').length },
+                  { id: 'add_staff', label: 'Staff Added', count: adminLogs.filter(l => l.category === 'add_staff').length },
+                  { id: 'edit_staff', label: 'Staff Edits', count: adminLogs.filter(l => l.category === 'edit_staff').length },
+                  { id: 'deletions', label: 'Deletions', count: adminLogs.filter(l => l.category?.includes('delete')).length },
+                  { id: 'branches', label: 'Branches', count: adminLogs.filter(l => l.category?.includes('branch')).length }
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    className={`settings-pill ${adminLogCategoryFilter === tab.id ? 'active' : ''}`}
+                    onClick={() => setAdminLogCategoryFilter(tab.id)}
+                  >
+                    <span>{tab.label}</span>
+                    <span className="pill-num">{tab.count}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Action History Feed */}
+            <div className="settings-history-feed">
+              {(() => {
+                const filtered = adminLogs.filter(log => {
+                  if (adminLogCategoryFilter === 'transfer' && log.category !== 'transfer') return false;
+                  if (adminLogCategoryFilter === 'add_staff' && log.category !== 'add_staff') return false;
+                  if (adminLogCategoryFilter === 'edit_staff' && log.category !== 'edit_staff') return false;
+                  if (adminLogCategoryFilter === 'deletions' && !log.category?.includes('delete')) return false;
+                  if (adminLogCategoryFilter === 'branches' && !log.category?.includes('branch')) return false;
+
+                  if (adminLogSearch) {
+                    const q = adminLogSearch.toLowerCase();
+                    const titleMatch = log.title.toLowerCase().includes(q);
+                    const catMatch = log.category.toLowerCase().includes(q);
+                    const detailMatch = JSON.stringify(log.details || {}).toLowerCase().includes(q);
+                    return titleMatch || catMatch || detailMatch;
+                  }
+                  return true;
+                });
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="empty-sub-state settings-empty">
+                      <History size={32} color="#cbd5e1" />
+                      <p>No activity logs found</p>
+                      <span className="sub-helper">
+                        {adminLogSearch ? 'Try a different search query' : 'Actions taken in admin portal will record here automatically'}
+                      </span>
+                    </div>
+                  );
+                }
+
+                return filtered.map((item) => {
+                  let badgeClass = 'badge-system';
+                  let badgeText = 'System';
+                  let icon = <Clock size={12} />;
+
+                  if (item.category === 'transfer') {
+                    badgeClass = 'badge-transfer';
+                    badgeText = 'Branch Transfer';
+                    icon = <ArrowRightLeft size={12} />;
+                  } else if (item.category === 'add_staff') {
+                    badgeClass = 'badge-add-staff';
+                    badgeText = 'Staff Added';
+                    icon = <Plus size={12} />;
+                  } else if (item.category === 'edit_staff') {
+                    badgeClass = 'badge-edit-staff';
+                    badgeText = 'Staff Updated';
+                    icon = <Pencil size={12} />;
+                  } else if (item.category?.includes('delete')) {
+                    badgeClass = 'badge-delete';
+                    badgeText = 'Deleted';
+                    icon = <Trash2 size={12} />;
+                  } else if (item.category?.includes('branch')) {
+                    badgeClass = 'badge-branch';
+                    badgeText = 'Branch';
+                    icon = <Store size={12} />;
+                  } else if (item.category === 'clear_logs') {
+                    badgeClass = 'badge-delete';
+                    badgeText = 'Logs Cleared';
+                    icon = <Trash2 size={12} />;
+                  }
+
+                  return (
+                    <div key={item.id} className="history-feed-card">
+                      <div className="feed-card-header">
+                        <span className={`feed-badge ${badgeClass}`}>
+                          {icon}
+                          <span>{badgeText}</span>
+                        </span>
+                        <div className="feed-timestamp">
+                          <Clock size={11} />
+                          <span>{item.dateStr} at {item.timeStr}</span>
+                        </div>
+                      </div>
+
+                      <div className="feed-body">
+                        <h4 className="feed-title">{item.title}</h4>
+                        {item.details && Object.keys(item.details).length > 0 && (
+                          <div className="feed-details-row">
+                            {item.details.fromBranch && item.details.toBranch && (
+                              <div className="feed-route-pill">
+                                <span>{item.details.fromBranch}</span>
+                                <ArrowRight size={11} className="route-arrow-inline" />
+                                <strong className="text-blue">{item.details.toBranch}</strong>
+                              </div>
+                            )}
+                            {item.details.staffName && !item.details.fromBranch && (
+                              <span className="feed-sub-chip">Staff: {item.details.staffName}</span>
+                            )}
+                            {item.details.branchName && !item.details.fromBranch && (
+                              <span className="feed-sub-chip">Branch: {item.details.branchName}</span>
+                            )}
+                            {item.details.role && (
+                              <span className="feed-sub-chip">Role: {item.details.role}</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="modal-form-actions settings-modal-actions">
+              <span className="settings-footer-note">
+                <ShieldCheck size={13} color="#059669" />
+                <span>Auto-saved to local memory for administrator reference</span>
+              </span>
+              <button 
+                type="button" 
+                className="btn-settings-close" 
+                onClick={() => setShowSettingsModal(false)}
+              >
+                Close Settings
+              </button>
+            </div>
           </div>
         </div>
       )}

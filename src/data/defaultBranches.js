@@ -141,6 +141,26 @@ export const STORAGE_KEY_BRANCHES = 'convenio_branches_master';
 export const STORAGE_KEY_RECORDS = 'convenio_attendance_records';
 export const STORAGE_KEY_SELECTED_BRANCH = 'convenio_selected_branch_id';
 export const STORAGE_KEY_SELECTED_EMP = 'convenio_selected_emp_id';
+export const STORAGE_KEY_ADMIN_LOGS = 'convenio_admin_audit_logs';
+
+export function getStoredAdminLogs() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_ADMIN_LOGS);
+    if (!raw) return [];
+    return JSON.parse(raw);
+  } catch (e) {
+    console.error('Error loading admin logs:', e);
+    return [];
+  }
+}
+
+export function saveStoredAdminLogs(logs) {
+  try {
+    localStorage.setItem(STORAGE_KEY_ADMIN_LOGS, JSON.stringify(logs));
+  } catch (e) {
+    console.error('Error saving admin logs:', e);
+  }
+}
 
 export function getStoredBranches() {
   try {
