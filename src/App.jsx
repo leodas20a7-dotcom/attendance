@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   LogIn, 
   LogOut, 
@@ -306,8 +306,12 @@ export default function App() {
         setSupabaseStatus(status);
 
         if (status.tablesReady) {
-          // Try fetching branches from Supabase
-          const cloudBranches = await fetchBranchesFromSupabase();
+          // Concurrently fetch branches & attendance records from Supabase
+          const [cloudBranches, cloudRecords] = await Promise.all([
+            fetchBranchesFromSupabase(),
+            fetchAttendanceFromSupabase()
+          ]);
+
           if (cloudBranches && cloudBranches.length > 0) {
             setBranches(cloudBranches);
           } else {
@@ -319,11 +323,7 @@ export default function App() {
             }
           }
 
-          // Fetch attendance records from Supabase
-          const cloudRecords = await fetchAttendanceFromSupabase();
           if (cloudRecords !== null) {
-            // Live Supabase database is single source of truth:
-            // Set state directly to cloud records so deleted data does not persist via local cache
             setRecords(cloudRecords);
             try {
               localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(cloudRecords));
@@ -503,7 +503,7 @@ export default function App() {
   const activeFormEmpName = currentFormEmployee ? currentFormEmployee.name : customEmployeeName.trim();
 
   // Helper to reliably check if a record was recorded today across any browser locale / format
-  const isRecordToday = (r) => {
+  const isRecordToday = useCallback((r) => {
     if (!r) return false;
     const now = new Date();
     const curYear = now.getFullYear();
@@ -565,7 +565,12 @@ export default function App() {
     }
 
     return false;
-  };
+  }, []);
+
+  // Memoized Today's Check Ins count
+  const todayCheckInsCount = useMemo(() => {
+    return records.filter(r => r.type === 'in' && isRecordToday(r)).length;
+  }, [records, isRecordToday]);
 
   // Smart Status Detection: Find latest attendance record for this employee today
   const latestTodayRecord = activeFormEmpName 
@@ -1258,19 +1263,24 @@ export default function App() {
     setTimeout(() => setCopiedRecordId(null), 2000);
   };
 
-  const filteredRecords = records.filter((r) => {
+  const filteredRecords = useMemo(() => {
     const search = searchTerm.toLowerCase();
-    const matchesSearch = 
-      r.employeeName.toLowerCase().includes(search) ||
-      (r.branchName && r.branchName.toLowerCase().includes(search)) ||
-      (r.location?.placeName && r.location.placeName.toLowerCase().includes(search)) ||
-      (r.location?.lat && String(r.location.lat).includes(search)) ||
-      (r.location?.lng && String(r.location.lng).includes(search));
-    const matchesType = filterType === 'all' || r.type === filterType;
-    return matchesSearch && matchesType;
-  });
+    return records.filter((r) => {
+      const matchesSearch = 
+        !search ||
+        r.employeeName.toLowerCase().includes(search) ||
+        (r.branchName && r.branchName.toLowerCase().includes(search)) ||
+        (r.location?.placeName && r.location.placeName.toLowerCase().includes(search)) ||
+        (r.location?.lat && String(r.location.lat).includes(search)) ||
+        (r.location?.lng && String(r.location.lng).includes(search));
+      const matchesType = filterType === 'all' || r.type === filterType;
+      return matchesSearch && matchesType;
+    });
+  }, [records, searchTerm, filterType]);
 
-  const totalEmployeesCount = branches.reduce((acc, b) => acc + (b.employees ? b.employees.length : 0), 0);
+  const totalEmployeesCount = useMemo(() => {
+    return branches.reduce((acc, b) => acc + (b.employees ? b.employees.length : 0), 0);
+  }, [branches]);
 
   return (
     <div className="page-wrapper">
@@ -1785,7 +1795,7 @@ export default function App() {
                 </div>
                 <div className="stat-card">
                   <span className="stat-label">Today's Check Ins</span>
-                  <span className="stat-val text-green">{records.filter(r => r.type === 'in' && isRecordToday(r)).length}</span>
+                  <span className="stat-val text-green">{todayCheckInsCount}</span>
                 </div>
                 <div className="stat-card">
                   <span className="stat-label">Total Attendance Logs</span>
@@ -2173,7 +2183,7 @@ export default function App() {
                               title="Click to view full photo"
                             >
                               {item.photo ? (
-                                <img src={item.photo} alt="Selfie" className="selfie-thumbnail" />
+                                <img src={item.photo} alt="Selfie" className="selfie-thumbnail" loading="lazy" decoding="async" width="40" height="40" />
                               ) : (
                                 <div className="no-photo"><Camera size={16} /></div>
                               )}
@@ -2393,7 +2403,7 @@ export default function App() {
                     >
                       <div className="history-log-avatar">
                         {item.photo ? (
-                          <img src={item.photo} alt={item.employeeName} className="history-log-thumb" />
+                          <img src={item.photo} alt={item.employeeName} className="history-log-thumb" loading="lazy" decoding="async" width="38" height="38" />
                         ) : (
                           <span className="history-log-initial">
                             {item.employeeName ? item.employeeName.charAt(0).toUpperCase() : 'U'}
@@ -3124,7 +3134,7 @@ export default function App() {
 
                   {capturedPhoto && (
                     <div className="captured-preview-box">
-                      <img src={capturedPhoto} alt="Captured Photo" className="preview-img" />
+                      <img src={capturedPhoto} alt="Captured Photo" className="preview-img" decoding="async" />
                       <div className="preview-stamp">
                         <CheckCircle2 size={16} /> Photo Captured
                       </div>
@@ -3187,7 +3197,7 @@ export default function App() {
             </p>
 
             <div className="success-emp-card">
-              <img src={successData.photo} alt="Verified Selfie" className="success-selfie-img" />
+              <img src={successData.photo} alt="Verified Selfie" className="success-selfie-img" decoding="async" width="56" height="56" />
               <div className="success-emp-info">
                 <strong>{successData.name}</strong>
                 <span className="emp-role-pill">{successData.role}</span>
@@ -3271,7 +3281,7 @@ export default function App() {
                   }}
                   title={selectedRecord.disablePhotoZoom ? selectedRecord.employeeName : "Click to view full photo"}
                 >
-                  <img src={selectedRecord.photo} alt={selectedRecord.employeeName} className="receipt-avatar-img" />
+                  <img src={selectedRecord.photo} alt={selectedRecord.employeeName} className="receipt-avatar-img" decoding="async" width="60" height="60" />
                   {!selectedRecord.disablePhotoZoom && (
                     <div className="receipt-zoom-hint">
                       <Eye size={16} />
@@ -3400,7 +3410,7 @@ export default function App() {
               </button>
             </div>
             <div className="photo-full-body">
-              <img src={viewingPhoto.photo} alt="Photo Full" className="full-size-selfie" />
+              <img src={viewingPhoto.photo} alt="Photo Full" className="full-size-selfie" decoding="async" />
             </div>
           </div>
         </div>
