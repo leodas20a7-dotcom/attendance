@@ -2824,45 +2824,17 @@ export default function App() {
             <div className="modal-header-row settings-header-row">
               <div className="modal-title-with-icon">
                 <div className="settings-header-icon-box">
-                  <Settings size={20} className="modal-icon-settings" />
+                  <Settings size={18} className="modal-icon-settings" />
                 </div>
-                <div>
-                  <h3 className="settings-modal-title">Admin Settings & History</h3>
-                  <p className="settings-modal-subtitle">
-                    Audit trail of all administrative actions, branch changes & staff updates
-                  </p>
-                </div>
+                <h3 className="settings-modal-title">Admin Action History</h3>
               </div>
               <button 
                 type="button" 
                 className="icon-close-btn" 
                 onClick={() => setShowSettingsModal(false)}
-                title="Close settings"
+                title="Close"
               >
                 <X size={20} />
-              </button>
-            </div>
-
-            {/* Admin Profile & Quick Info Strip */}
-            <div className="settings-info-strip">
-              <div className="strip-item">
-                <ShieldCheck size={14} className="strip-icon-red" />
-                <span className="strip-label">Account:</span>
-                <strong className="strip-val">hr@lordsandkings.co</strong>
-              </div>
-              <div className="strip-item">
-                <Activity size={14} className="strip-icon-blue" />
-                <span className="strip-label">Logged Actions:</span>
-                <strong className="strip-val text-blue">{adminLogs.length}</strong>
-              </div>
-              <button 
-                type="button" 
-                className="btn-export-admin-logs" 
-                onClick={exportAdminLogsToCSV}
-                title="Download CSV of all admin actions"
-              >
-                <FileSpreadsheet size={13} />
-                <span>Export Audit CSV</span>
               </button>
             </div>
 
@@ -2872,7 +2844,7 @@ export default function App() {
                 <Search size={15} color="#94a3b8" />
                 <input 
                   type="text" 
-                  placeholder="Filter logs by name, branch, action..."
+                  placeholder="Search logs by name, branch, action..."
                   value={adminLogSearch}
                   onChange={(e) => setAdminLogSearch(e.target.value)}
                   className="settings-search-input"
@@ -2884,23 +2856,23 @@ export default function App() {
                 )}
               </div>
 
-              <div className="settings-filter-pills">
+              {/* Responsive Filter Buttons (No horizontal scroll tabs) */}
+              <div className="settings-filter-buttons">
                 {[
                   { id: 'all', label: 'All', count: adminLogs.length },
                   { id: 'transfer', label: 'Transfers', count: adminLogs.filter(l => l.category === 'transfer').length },
-                  { id: 'add_staff', label: 'Staff Added', count: adminLogs.filter(l => l.category === 'add_staff').length },
-                  { id: 'edit_staff', label: 'Staff Edits', count: adminLogs.filter(l => l.category === 'edit_staff').length },
+                  { id: 'staff', label: 'Staff', count: adminLogs.filter(l => l.category === 'add_staff' || l.category === 'edit_staff').length },
                   { id: 'deletions', label: 'Deletions', count: adminLogs.filter(l => l.category?.includes('delete')).length },
                   { id: 'branches', label: 'Branches', count: adminLogs.filter(l => l.category?.includes('branch')).length }
-                ].map(tab => (
+                ].map(btn => (
                   <button
-                    key={tab.id}
+                    key={btn.id}
                     type="button"
-                    className={`settings-pill ${adminLogCategoryFilter === tab.id ? 'active' : ''}`}
-                    onClick={() => setAdminLogCategoryFilter(tab.id)}
+                    className={`settings-filter-btn ${adminLogCategoryFilter === btn.id ? 'active' : ''}`}
+                    onClick={() => setAdminLogCategoryFilter(btn.id)}
                   >
-                    <span>{tab.label}</span>
-                    <span className="pill-num">{tab.count}</span>
+                    <span>{btn.label}</span>
+                    <span className="filter-btn-count">{btn.count}</span>
                   </button>
                 ))}
               </div>
@@ -2911,8 +2883,7 @@ export default function App() {
               {(() => {
                 const filtered = adminLogs.filter(log => {
                   if (adminLogCategoryFilter === 'transfer' && log.category !== 'transfer') return false;
-                  if (adminLogCategoryFilter === 'add_staff' && log.category !== 'add_staff') return false;
-                  if (adminLogCategoryFilter === 'edit_staff' && log.category !== 'edit_staff') return false;
+                  if (adminLogCategoryFilter === 'staff' && log.category !== 'add_staff' && log.category !== 'edit_staff') return false;
                   if (adminLogCategoryFilter === 'deletions' && !log.category?.includes('delete')) return false;
                   if (adminLogCategoryFilter === 'branches' && !log.category?.includes('branch')) return false;
 
@@ -3011,18 +2982,23 @@ export default function App() {
               })()}
             </div>
 
-            {/* Modal Footer */}
-            <div className="modal-form-actions settings-modal-actions">
-              <span className="settings-footer-note">
-                <ShieldCheck size={13} color="#059669" />
-                <span>Auto-saved to local memory for administrator reference</span>
-              </span>
+            {/* Clean Modal Footer */}
+            <div className="settings-modal-actions-simple">
               <button 
                 type="button" 
-                className="btn-settings-close" 
+                className="btn-export-simple"
+                onClick={exportAdminLogsToCSV}
+                title="Download CSV of action logs"
+              >
+                <FileSpreadsheet size={15} />
+                <span>Export CSV</span>
+              </button>
+              <button 
+                type="button" 
+                className="btn-settings-close-simple" 
                 onClick={() => setShowSettingsModal(false)}
               >
-                Close Settings
+                Close
               </button>
             </div>
           </div>

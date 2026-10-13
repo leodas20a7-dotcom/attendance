@@ -4939,49 +4939,25 @@ body {
     font-size: 0.82rem;
   }
 
-  .settings-filter-pills {
-    padding-bottom: 0.35rem;
-    gap: 0.3rem;
   }
 
-  .settings-pill {
-    padding: 0.28rem 0.55rem;
-    font-size: 0.74rem;
-  }
-
-  .settings-logs-list {
-    max-height: 44vh;
-    padding-right: 0.25rem;
-  }
-
-  .settings-log-item {
-    padding: 0.75rem 0.8rem;
-  }
-
-  .log-item-header {
-    flex-direction: column;
-    align-items: flex-start;
+  .settings-filter-buttons {
     gap: 0.35rem;
   }
 
-  .log-item-desc {
-    font-size: 0.82rem;
+  .settings-filter-btn {
+    padding: 0.32rem 0.6rem;
+    font-size: 0.76rem;
   }
 
-  .settings-modal-actions {
-    flex-direction: column-reverse;
-    gap: 0.55rem;
-    align-items: stretch;
-    padding-top: 0.65rem;
-  }
-
-  .settings-footer-note {
-    justify-content: center;
-    font-size: 0.72rem;
-  }
-
-  .btn-settings-close {
+  .settings-modal-actions-simple {
     width: 100%;
+    gap: 0.5rem;
+  }
+
+  .btn-export-simple,
+  .btn-settings-close-simple {
+    flex: 1;
     justify-content: center;
     padding: 0.55rem;
     font-size: 0.82rem;
@@ -5501,44 +5477,52 @@ body {
   width: 100%;
 }
 
-.settings-filter-pills {
+.settings-filter-buttons {
   display: flex;
-  gap: 0.35rem;
-  overflow-x: auto;
-  padding-bottom: 0.2rem;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  width: 100%;
 }
 
-.settings-pill {
+.settings-filter-btn {
   background: #f1f5f9;
   border: 1px solid var(--border-light);
-  border-radius: 7px;
-  padding: 0.3rem 0.65rem;
+  border-radius: 8px;
+  padding: 0.38rem 0.75rem;
   font-family: inherit;
-  font-size: 0.76rem;
+  font-size: 0.8rem;
   font-weight: 700;
-  color: #64748b;
+  color: #475569;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  white-space: nowrap;
-  transition: all 0.15s;
+  gap: 0.4rem;
+  transition: all 0.15s ease;
 }
 
-.settings-pill:hover {
+.settings-filter-btn:hover {
   background: #e2e8f0;
   color: #0f172a;
 }
 
-.settings-pill.active {
+.settings-filter-btn.active {
   background: #0f172a;
   color: #ffffff;
   border-color: #0f172a;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.15);
 }
 
-.settings-pill .pill-num {
-  font-size: 0.68rem;
-  opacity: 0.8;
+.filter-btn-count {
+  font-size: 0.7rem;
+  background: rgba(0, 0, 0, 0.08);
+  padding: 0.1rem 0.4rem;
+  border-radius: 6px;
+  line-height: 1.2;
+}
+
+.settings-filter-btn.active .filter-btn-count {
+  background: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
 }
 
 /* Feed */
@@ -5680,38 +5664,57 @@ body {
   color: #64748b;
 }
 
-/* Settings Modal Actions */
-.settings-modal-actions {
+/* Simplified Settings Modal Actions */
+.settings-modal-actions-simple {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 0.65rem;
   padding-top: 0.75rem;
   border-top: 1px solid var(--border-light);
   margin-top: 0.25rem !important;
 }
 
-.settings-footer-note {
+.btn-export-simple {
+  background: #ffffff;
+  border: 1px solid var(--border-light);
+  color: #334155;
+  border-radius: 8px;
+  padding: 0.5rem 0.95rem;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  font-size: 0.74rem;
-  color: #64748b;
-  font-weight: 500;
+  gap: 0.4rem;
+  transition: all 0.15s ease;
 }
 
+.btn-export-simple:hover {
+  background: #f8fafc;
+  color: #0f172a;
+  border-color: #cbd5e1;
+}
+
+.btn-settings-close-simple,
 .btn-settings-close {
   background: #0f172a;
   color: #ffffff;
   border: none;
   border-radius: 8px;
-  padding: 0.55rem 1.15rem;
+  padding: 0.5rem 1.25rem;
   font-family: inherit;
   font-size: 0.84rem;
   font-weight: 700;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   transition: opacity 0.15s;
 }
 
+.btn-settings-close-simple:hover,
 .btn-settings-close:hover {
   opacity: 0.9;
 }
