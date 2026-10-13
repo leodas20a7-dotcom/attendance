@@ -91,6 +91,55 @@ import {
   SUPABASE_SCHEMA_SQL
 } from './lib/supabase';
 
+// Helper to format any time string strictly in 12-hour AM/PM format (e.g. "03:05:24 PM")
+export function formatTo12HourTime(timeStr) {
+  if (!timeStr) return '';
+  const str = String(timeStr).trim();
+
+  // Already 12-hour format with AM/PM (e.g. "03:04:01 PM", "02:58:56 pm", "8:17:39 AM")
+  const ampmMatch = str.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)$/i);
+  if (ampmMatch) {
+    let hours = parseInt(ampmMatch[1], 10);
+    const minutes = ampmMatch[2];
+    const seconds = ampmMatch[3];
+    const ampm = ampmMatch[4].toUpperCase();
+    if (hours === 0) hours = 12;
+    if (hours > 12) hours = hours % 12;
+    const formattedHour = String(hours).padStart(2, '0');
+    return seconds !== undefined
+      ? `${formattedHour}:${minutes}:${seconds} ${ampm}`
+      : `${formattedHour}:${minutes} ${ampm}`;
+  }
+
+  // 24-hour format: HH:MM:SS or HH:MM (e.g. "15:05:24" -> "03:05:24 PM")
+  const timeMatch = str.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (timeMatch) {
+    let hours = parseInt(timeMatch[1], 10);
+    const minutes = timeMatch[2];
+    const seconds = timeMatch[3];
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    if (hours === 0) hours = 12;
+    const formattedHour = String(hours).padStart(2, '0');
+    return seconds !== undefined
+      ? `${formattedHour}:${minutes}:${seconds} ${ampm}`
+      : `${formattedHour}:${minutes} ${ampm}`;
+  }
+
+  // Full Date / ISO timestamp string
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) {
+    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+  }
+
+  // Fallback: uppercase any am/pm in string
+  if (/\b(am|pm)\b/i.test(str)) {
+    return str.replace(/([0-9])\s*(am|pm)/i, (_, d, p) => `${d} ${p.toUpperCase()}`);
+  }
+
+  return str;
+}
+
 export default function App() {
   // Navigation: 'attendance' or 'admin'
   const getInitialView = () => {
@@ -305,7 +354,7 @@ export default function App() {
       id: 'act-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
       timestamp: now.toISOString(),
       dateStr: now.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
-      timeStr: now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
+      timeStr: now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }),
       category,
       title,
       details
@@ -326,7 +375,7 @@ export default function App() {
       `"${l.category}"`,
       `"${l.title.replace(/"/g, '""')}"`,
       `"${l.dateStr}"`,
-      `"${l.timeStr}"`,
+      `"${formatTo12HourTime(l.timeStr)}"`,
       `"${JSON.stringify(l.details).replace(/"/g, '""')}"`
     ]);
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
@@ -1166,7 +1215,7 @@ export default function App() {
 
     // Guardrail: Cannot Check In if already checked in
     if (actionType === 'in' && latestTodayRecord?.type === 'in') {
-      setFormValidationMsg(`${empName} is already checked in today at ${latestTodayRecord.shortTime || latestTodayRecord.time}. Tap Check Out when leaving.`);
+      setFormValidationMsg(`${empName} is already checked in today at ${formatTo12HourTime(latestTodayRecord.shortTime || latestTodayRecord.time)}. Tap Check Out when leaving.`);
       return;
     }
 
@@ -1296,8 +1345,8 @@ export default function App() {
 
     const now = new Date();
     const formattedDate = now.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
-    const formattedTime = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const shortTime = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const formattedTime = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    const shortTime = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 
     const activeEmpName = currentFormEmployee ? currentFormEmployee.name : (customEmployeeName.trim() || 'Employee');
     const activeBranchName = currentFormBranch ? currentFormBranch.name : 'Main Mart';
@@ -1498,7 +1547,7 @@ export default function App() {
       `"${r.branchName || '-'}"`,
       `"${r.type === 'in' ? 'Check In' : 'Check Out'}"`,
       `"${r.date}"`,
-      `"${r.time || r.shortTime}"`,
+      `"${formatTo12HourTime(r.time || r.shortTime)}"`,
       `"${r.geofenceVerified ? 'Yes (On-Site)' : 'No'}"`,
       `"${r.distanceMeters != null ? r.distanceMeters + 'm' : '-'}"`,
       `"${r.location?.lat ?? ''}"`,
@@ -1538,7 +1587,7 @@ export default function App() {
   };
 
   const copyRecordDetails = (record) => {
-    const text = `Convenio Marts Attendance Record\nID: ${record.id}\nEmployee: ${record.employeeName} (${record.employeeRole || 'Staff'})\nBranch: ${record.branchName || '-'}\nType: ${record.type === 'in' ? 'Check In' : 'Check Out'}\nDate & Time: ${record.date} at ${record.time || record.shortTime}\nCoordinates: ${record.location?.lat ? `${record.location.lat}, ${record.location.lng}` : 'N/A'}\nLocation: ${record.location?.placeName || 'N/A'}\nGoogle Maps: ${record.location?.lat ? `https://www.google.com/maps?q=${record.location.lat},${record.location.lng}` : 'N/A'}`;
+    const text = `Convenio Marts Attendance Record\nID: ${record.id}\nEmployee: ${record.employeeName} (${record.employeeRole || 'Staff'})\nBranch: ${record.branchName || '-'}\nType: ${record.type === 'in' ? 'Check In' : 'Check Out'}\nDate & Time: ${record.date} at ${formatTo12HourTime(record.time || record.shortTime)}\nCoordinates: ${record.location?.lat ? `${record.location.lat}, ${record.location.lng}` : 'N/A'}\nLocation: ${record.location?.placeName || 'N/A'}\nGoogle Maps: ${record.location?.lat ? `https://www.google.com/maps?q=${record.location.lat},${record.location.lng}` : 'N/A'}`;
     navigator.clipboard.writeText(text);
     setCopiedRecordId(record.id);
     setTimeout(() => setCopiedRecordId(null), 2000);
@@ -1844,12 +1893,12 @@ export default function App() {
                           {latestTodayRecord?.type === 'in' ? (
                             <>
                               <strong className="status-title-in">Checked In Today</strong>
-                              <span className="status-time-chip">{latestTodayRecord.shortTime || latestTodayRecord.time}</span>
+                              <span className="status-time-chip">{formatTo12HourTime(latestTodayRecord.shortTime || latestTodayRecord.time)}</span>
                             </>
                           ) : latestTodayRecord?.type === 'out' ? (
                             <>
                               <strong className="status-title-out">Checked Out Today</strong>
-                              <span className="status-time-chip">{latestTodayRecord.shortTime || latestTodayRecord.time}</span>
+                              <span className="status-time-chip">{formatTo12HourTime(latestTodayRecord.shortTime || latestTodayRecord.time)}</span>
                             </>
                           ) : (
                             <strong className="status-title-none">Not Checked In Today</strong>
@@ -2708,7 +2757,7 @@ export default function App() {
                           {/* Time */}
                           <td>
                             <div className="table-time-cell">
-                              <div className="time-primary">{item.time || item.shortTime}</div>
+                              <div className="time-primary">{formatTo12HourTime(item.time || item.shortTime)}</div>
                               <div className="date-secondary">{item.date}</div>
                             </div>
                           </td>
@@ -3004,7 +3053,7 @@ export default function App() {
                           </div>
                         </div>
                         <div className="transfer-audit-right">
-                          <span className="transfer-audit-time">{log.timeStr}</span>
+                          <span className="transfer-audit-time">{formatTo12HourTime(log.timeStr)}</span>
                           <span className="transfer-audit-date">{log.dateStr}</span>
                         </div>
                       </div>
@@ -3176,7 +3225,7 @@ export default function App() {
                         <div className="history-log-meta-row">
                           <span className="history-log-time-chip">
                             <Clock size={11} />
-                            <span>{item.time || item.shortTime}</span>
+                            <span>{formatTo12HourTime(item.time || item.shortTime)}</span>
                           </span>
                           <span className="history-meta-bullet">•</span>
                           <span className="history-log-date-text">{item.date}</span>
@@ -3715,7 +3764,7 @@ export default function App() {
                         </span>
                         <div className="feed-timestamp">
                           <Clock size={11} />
-                          <span>{item.dateStr} at {item.timeStr}</span>
+                          <span>{item.dateStr} at {formatTo12HourTime(item.timeStr)}</span>
                         </div>
                       </div>
 
@@ -3928,7 +3977,7 @@ export default function App() {
               {successData.type === 'in' ? 'Check In Recorded!' : 'Check Out Recorded!'}
             </h2>
             <p className="modal-text">
-              Recorded at <strong>{successData.shortTime}</strong> on {successData.formattedDate}
+              Recorded at <strong>{formatTo12HourTime(successData.shortTime)}</strong> on {successData.formattedDate}
             </p>
 
             <div className="success-emp-card">
@@ -4044,7 +4093,7 @@ export default function App() {
                     <span>Punch Time</span>
                   </div>
                   <div className="receipt-spec-value">
-                    <strong className="receipt-time-strong">{selectedRecord.time || selectedRecord.shortTime}</strong>
+                    <strong className="receipt-time-strong">{formatTo12HourTime(selectedRecord.time || selectedRecord.shortTime)}</strong>
                   </div>
                 </div>
 
@@ -4137,7 +4186,7 @@ export default function App() {
                 <h3>{viewingPhoto.employeeName}</h3>
                 <span className="photo-date-subtitle">
                   {viewingPhoto.branchName ? `${viewingPhoto.branchName} • ` : ''}
-                  {viewingPhoto.type === 'in' ? 'Check In' : 'Check Out'} at {viewingPhoto.time || viewingPhoto.shortTime}, {viewingPhoto.date}
+                  {viewingPhoto.type === 'in' ? 'Check In' : 'Check Out'} at {formatTo12HourTime(viewingPhoto.time || viewingPhoto.shortTime)}, {viewingPhoto.date}
                 </span>
               </div>
               <button className="icon-close-btn" onClick={() => setViewingPhoto(null)}>
