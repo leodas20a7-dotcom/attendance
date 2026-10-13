@@ -43,7 +43,8 @@ import {
   EyeOff,
   Settings,
   Activity,
-  FileText
+  FileText,
+  Filter
 } from 'lucide-react';
 
 import { 
@@ -2838,13 +2839,13 @@ export default function App() {
               </button>
             </div>
 
-            {/* Filter & Search Bar */}
-            <div className="settings-toolbar">
+            {/* Compact Search & Filter Bar */}
+            <div className="settings-toolbar-compact">
               <div className="settings-search-wrapper">
                 <Search size={15} color="#94a3b8" />
                 <input 
                   type="text" 
-                  placeholder="Search logs by name, branch, action..."
+                  placeholder="Search logs..."
                   value={adminLogSearch}
                   onChange={(e) => setAdminLogSearch(e.target.value)}
                   className="settings-search-input"
@@ -2856,25 +2857,41 @@ export default function App() {
                 )}
               </div>
 
-              {/* Responsive Filter Buttons (No horizontal scroll tabs) */}
-              <div className="settings-filter-buttons">
-                {[
-                  { id: 'all', label: 'All', count: adminLogs.length },
-                  { id: 'transfer', label: 'Transfers', count: adminLogs.filter(l => l.category === 'transfer').length },
-                  { id: 'staff', label: 'Staff', count: adminLogs.filter(l => l.category === 'add_staff' || l.category === 'edit_staff').length },
-                  { id: 'deletions', label: 'Deletions', count: adminLogs.filter(l => l.category?.includes('delete')).length },
-                  { id: 'branches', label: 'Branches', count: adminLogs.filter(l => l.category?.includes('branch')).length }
-                ].map(btn => (
-                  <button
-                    key={btn.id}
-                    type="button"
-                    className={`settings-filter-btn ${adminLogCategoryFilter === btn.id ? 'active' : ''}`}
-                    onClick={() => setAdminLogCategoryFilter(btn.id)}
-                  >
-                    <span>{btn.label}</span>
-                    <span className="filter-btn-count">{btn.count}</span>
-                  </button>
-                ))}
+              {/* Single Filter Button containing all options */}
+              <div className={`settings-filter-dropdown-btn ${adminLogCategoryFilter !== 'all' ? 'has-active-filter' : ''}`} title="Filter by category">
+                <Filter size={14} className="filter-dropdown-icon" />
+                <span className="filter-dropdown-text">
+                  {adminLogCategoryFilter === 'all' ? 'All' :
+                   adminLogCategoryFilter === 'transfer' ? 'Transfers' :
+                   adminLogCategoryFilter === 'staff' ? 'Staff' :
+                   adminLogCategoryFilter === 'deletions' ? 'Deletions' :
+                   adminLogCategoryFilter === 'branches' ? 'Branches' : 'Filter'}
+                </span>
+                <span className="filter-dropdown-badge">
+                  {adminLogCategoryFilter === 'all'
+                    ? adminLogs.length
+                    : adminLogCategoryFilter === 'transfer'
+                    ? adminLogs.filter(l => l.category === 'transfer').length
+                    : adminLogCategoryFilter === 'staff'
+                    ? adminLogs.filter(l => l.category === 'add_staff' || l.category === 'edit_staff').length
+                    : adminLogCategoryFilter === 'deletions'
+                    ? adminLogs.filter(l => l.category?.includes('delete')).length
+                    : adminLogs.filter(l => l.category?.includes('branch')).length
+                  }
+                </span>
+                <ChevronDown size={14} className="filter-dropdown-chevron" />
+                <select 
+                  value={adminLogCategoryFilter} 
+                  onChange={(e) => setAdminLogCategoryFilter(e.target.value)}
+                  className="settings-filter-select-overlay"
+                  aria-label="Filter logs by category"
+                >
+                  <option value="all">All Logs ({adminLogs.length})</option>
+                  <option value="transfer">Transfers ({adminLogs.filter(l => l.category === 'transfer').length})</option>
+                  <option value="staff">Staff ({adminLogs.filter(l => l.category === 'add_staff' || l.category === 'edit_staff').length})</option>
+                  <option value="deletions">Deletions ({adminLogs.filter(l => l.category?.includes('delete')).length})</option>
+                  <option value="branches">Branches ({adminLogs.filter(l => l.category?.includes('branch')).length})</option>
+                </select>
               </div>
             </div>
 
