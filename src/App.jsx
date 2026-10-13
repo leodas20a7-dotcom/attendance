@@ -220,22 +220,26 @@ export default function App() {
   const [deletePasswordError, setDeletePasswordError] = useState('');
   const [showDeletePassword, setShowDeletePassword] = useState(false);
 
-  // Admin Action Audit Logs & Settings
+  // Admin Action Audit Logs & Settings (Only real actions, no fake/dummy entries)
   const [adminLogs, setAdminLogs] = useState(() => {
     const stored = getStoredAdminLogs();
-    if (stored && stored.length > 0) return stored;
-    return [
-      {
-        id: 'act-init',
-        timestamp: new Date().toISOString(),
-        dateStr: new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
-        timeStr: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
-        category: 'system',
-        title: 'Admin Action History initialized',
-        details: { note: 'Tracking all employee reassignments, additions, branch updates and security actions.' }
+    if (stored && Array.isArray(stored)) {
+      // Remove any fake starter seed entries like 'act-init' or 'initialized'
+      const realLogs = stored.filter(l => l.id !== 'act-init' && l.category !== 'system' && !l.title?.toLowerCase().includes('initialized'));
+      if (realLogs.length !== stored.length) {
+        saveStoredAdminLogs(realLogs);
       }
-    ];
+      return realLogs;
+    }
+    return [];
   });
+
+  const handleClearAdminLogs = () => {
+    if (window.confirm('Are you sure you want to clear all action history logs?')) {
+      setAdminLogs([]);
+      saveStoredAdminLogs([]);
+    }
+  };
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [adminLogSearch, setAdminLogSearch] = useState('');
   const [adminLogCategoryFilter, setAdminLogCategoryFilter] = useState('all');
@@ -2918,9 +2922,9 @@ export default function App() {
                   return (
                     <div className="empty-sub-state settings-empty">
                       <History size={32} color="#cbd5e1" />
-                      <p>No activity logs found</p>
+                      <p>No action history yet</p>
                       <span className="sub-helper">
-                        {adminLogSearch ? 'Try a different search query' : 'Actions taken in admin portal will record here automatically'}
+                        {adminLogSearch ? 'No logs match your search query' : 'Real actions like transferring, adding, editing, or deleting employees will automatically be recorded here.'}
                       </span>
                     </div>
                   );
@@ -3001,15 +3005,29 @@ export default function App() {
 
             {/* Clean Modal Footer */}
             <div className="settings-modal-actions-simple">
-              <button 
-                type="button" 
-                className="btn-export-simple"
-                onClick={exportAdminLogsToCSV}
-                title="Download CSV of action logs"
-              >
-                <FileSpreadsheet size={15} />
-                <span>Export CSV</span>
-              </button>
+              <div style={{ display: 'flex', gap: '0.45rem', alignItems: 'center' }}>
+                <button 
+                  type="button" 
+                  className="btn-export-simple"
+                  onClick={exportAdminLogsToCSV}
+                  disabled={adminLogs.length === 0}
+                  title="Download CSV of action logs"
+                >
+                  <FileSpreadsheet size={15} />
+                  <span>Export CSV</span>
+                </button>
+                {adminLogs.length > 0 && (
+                  <button 
+                    type="button" 
+                    className="btn-clear-logs-simple"
+                    onClick={handleClearAdminLogs}
+                    title="Clear history"
+                  >
+                    <Trash2 size={13} />
+                    <span>Clear</span>
+                  </button>
+                )}
+              </div>
               <button 
                 type="button" 
                 className="btn-settings-close-simple" 

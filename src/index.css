@@ -5734,6 +5734,28 @@ body {
   border-color: #cbd5e1;
 }
 
+.btn-clear-logs-simple {
+  background: #ffffff;
+  border: 1px solid #fee2e2;
+  color: #ef4444;
+  border-radius: 8px;
+  padding: 0.5rem 0.85rem;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  transition: all 0.15s ease;
+}
+
+.btn-clear-logs-simple:hover {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #dc2626;
+}
+
 .btn-settings-close-simple,
 .btn-settings-close {
   background: #0f172a;
