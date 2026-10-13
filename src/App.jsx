@@ -1993,27 +1993,31 @@ export default function App() {
               </div>
 
               {/* Role Toggle Tabs */}
-              <div className="login-role-tabs">
+              <div className="login-role-tabs" role="tablist" aria-label="Portal Selection">
                 <button
                   type="button"
-                  className={`login-role-tab ${loginRoleTab === 'admin' ? 'active' : ''}`}
+                  role="tab"
+                  aria-selected={loginRoleTab === 'admin'}
+                  className={`login-role-tab tab-admin ${loginRoleTab === 'admin' ? 'active' : ''}`}
                   onClick={() => {
                     setLoginRoleTab('admin');
                     setAdminAuthError('');
                   }}
                 >
-                  <ShieldCheck size={16} />
+                  <ShieldCheck size={17} />
                   <span>Super Admin</span>
                 </button>
                 <button
                   type="button"
-                  className={`login-role-tab ${loginRoleTab === 'manager' ? 'active' : ''}`}
+                  role="tab"
+                  aria-selected={loginRoleTab === 'manager'}
+                  className={`login-role-tab tab-manager ${loginRoleTab === 'manager' ? 'active' : ''}`}
                   onClick={() => {
                     setLoginRoleTab('manager');
                     setAdminAuthError('');
                   }}
                 >
-                  <Users size={16} />
+                  <Users size={17} />
                   <span>Store Manager</span>
                 </button>
               </div>

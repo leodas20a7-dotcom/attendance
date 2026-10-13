@@ -6282,39 +6282,79 @@ body {
 .login-role-tabs {
   display: flex;
   background: #f1f5f9;
-  padding: 0.3rem;
-  border-radius: 12px;
+  padding: 0.35rem;
+  border-radius: 14px;
   gap: 0.35rem;
-  margin-bottom: 1.25rem;
-  border: 1px solid #e2e8f0;
+  margin-bottom: 1.5rem;
+  border: 1.5px solid #e2e8f0;
+  box-shadow: inset 0 2px 4px rgba(15, 23, 42, 0.04);
+  box-sizing: border-box;
+  width: 100%;
 }
 
+.login-role-tab,
 .btn-role-tab {
   flex: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.45rem;
-  padding: 0.6rem 0.85rem;
+  gap: 0.5rem;
+  padding: 0.65rem 0.95rem;
   font-family: inherit;
-  font-size: 0.85rem;
+  font-size: 0.88rem;
   font-weight: 600;
+  letter-spacing: -0.01em;
   border: none;
-  border-radius: 9px;
+  border-radius: 10px;
   background: transparent;
   color: #64748b;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+  outline: none;
+  box-sizing: border-box;
 }
 
+.login-role-tab:hover,
 .btn-role-tab:hover {
   color: #0f172a;
+  background: rgba(255, 255, 255, 0.6);
 }
 
+.login-role-tab:focus-visible,
+.btn-role-tab:focus-visible {
+  outline: 2px solid #e11d48;
+  outline-offset: 2px;
+}
+
+.login-role-tab.active,
 .btn-role-tab.active {
   background: #ffffff;
   color: #0f172a;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  font-weight: 700;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08), 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.login-role-tab.tab-admin.active {
+  color: var(--brand-red, #e11d48);
+}
+
+.login-role-tab.tab-admin.active svg {
+  color: var(--brand-red, #e11d48);
+}
+
+.login-role-tab.tab-manager.active {
+  color: #b45309;
+}
+
+.login-role-tab.tab-manager.active svg {
+  color: #d97706;
+}
+
+.admin-login-badge-icon.icon-manager-amber {
+  background: rgba(217, 119, 6, 0.1) !important;
+  color: #d97706 !important;
+  box-shadow: 0 6px 18px rgba(217, 119, 6, 0.2) !important;
 }
 
 .login-custom-input {
