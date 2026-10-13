@@ -2894,9 +2894,6 @@ export default function App() {
                       <h3>Store Managers Directory</h3>
                       <span className="mgr-count-pill">{managersList.length} Active Managers</span>
                     </div>
-                    <p className="mgr-subtitle">
-                      Store managers have restricted access to transfer employees between branches and review attendance records. Every transfer explicitly records and badges the manager's name for complete traceability.
-                    </p>
                   </div>
                 </div>
                 <button 
@@ -2908,22 +2905,6 @@ export default function App() {
                   <Plus size={16} />
                   <span>Add New Manager</span>
                 </button>
-              </div>
-
-              {/* Security & Permissions Policy Strip */}
-              <div className="managers-policy-strip">
-                <div className="policy-pill policy-allowed">
-                  <ShieldCheck size={14} />
-                  <span>Allowed: Inter-Branch Employee Transfers (Single & Bulk)</span>
-                </div>
-                <div className="policy-pill policy-allowed">
-                  <Eye size={14} />
-                  <span>Allowed: View & Filter Attendance Records</span>
-                </div>
-                <div className="policy-pill policy-restricted">
-                  <Lock size={14} />
-                  <span>Restricted: No Branch Creation/Deletion, No Record Purging</span>
-                </div>
               </div>
 
               {/* Managers Grid */}
@@ -2940,17 +2921,6 @@ export default function App() {
                           <span className="mgr-role-badge">{mgr.role || 'Store Manager'}</span>
                         </div>
                         <span className="mgr-email-label">{mgr.email || 'manager@convenio.in'}</span>
-                      </div>
-                    </div>
-
-                    <div className="mgr-card-capabilities">
-                      <div className="mgr-cap-item">
-                        <Check size={13} className="text-emerald" />
-                        <span>Authorized for Staff Transfers</span>
-                      </div>
-                      <div className="mgr-cap-item">
-                        <Check size={13} className="text-emerald" />
-                        <span>Authorized for Attendance Logs</span>
                       </div>
                     </div>
 
