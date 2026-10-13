@@ -5777,3 +5777,497 @@ body {
 .btn-settings-close:hover {
   opacity: 0.9;
 }
+
+/* ================= ATTENDANCE LOGS: DATE FILTER & PAGINATION ================= */
+
+/* Date Filter Button in Toolbar */
+.btn-date-filter {
+  background: #ffffff;
+  border: 1px solid var(--border-light);
+  color: #1e293b;
+  border-radius: 8px;
+  padding: 0.46rem 0.85rem;
+  font-family: inherit;
+  font-size: 0.84rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+}
+
+.btn-date-filter:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+.btn-date-filter.active {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #e11d24;
+  box-shadow: 0 1px 3px rgba(225, 29, 36, 0.12);
+}
+
+.btn-date-label {
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn-date-clear-inline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fee2e2;
+  color: #e11d24;
+  margin-left: 0.2rem;
+  transition: background 0.15s;
+}
+
+.btn-date-clear-inline:hover {
+  background: #fecaca;
+}
+
+/* Active Date Filter Banner */
+.active-date-filter-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  padding: 0.6rem 0.95rem;
+  margin-top: 0.75rem;
+  font-size: 0.84rem;
+  color: #991b1b;
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+.filter-banner-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.banner-cal-icon {
+  color: #e11d24;
+  flex-shrink: 0;
+}
+
+.btn-clear-date-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: #ffffff;
+  border: 1px solid #fca5a5;
+  color: #dc2626;
+  border-radius: 6px;
+  padding: 0.28rem 0.65rem;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.btn-clear-date-banner:hover {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+/* Table Pagination Bar */
+.table-pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1.25rem;
+  background: #ffffff;
+  border-top: 1px solid var(--border-light);
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+  flex-wrap: wrap;
+}
+
+.pagination-info {
+  font-size: 0.84rem;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pagination-info strong {
+  color: #0f172a;
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.pagination-rows-select {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: #64748b;
+}
+
+.page-size-dropdown {
+  padding: 0.32rem 0.65rem;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  background: #ffffff;
+  color: #0f172a;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.page-size-dropdown:focus {
+  border-color: #e11d24;
+}
+
+.pagination-nav-group {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.btn-page-nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border-light);
+  background: #ffffff;
+  color: #334155;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-page-nav:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+.btn-page-nav:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: #f8fafc;
+}
+
+.pagination-page-indicator {
+  padding: 0 0.55rem;
+  font-size: 0.82rem;
+  color: #475569;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.pagination-page-indicator strong {
+  color: #0f172a;
+  font-weight: 700;
+}
+
+/* Date Filter Modal */
+.date-filter-modal {
+  max-width: 480px;
+  width: 95%;
+  background: #ffffff;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.18);
+  animation: modalScaleIn 0.22s ease-out;
+}
+
+.date-filter-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 1.15rem 1.25rem 0.95rem;
+  border-bottom: 1px solid var(--border-light);
+  gap: 0.75rem;
+}
+
+.date-filter-modal-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.icon-calendar-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: #fee2e2;
+  color: #e11d24;
+  flex-shrink: 0;
+}
+
+.date-filter-modal-title h3 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 0.2rem;
+}
+
+.date-filter-modal-title p {
+  font-size: 0.8rem;
+  color: #64748b;
+  line-height: 1.35;
+}
+
+.date-filter-modal-body {
+  padding: 1.25rem;
+}
+
+.date-mode-toggle-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  background: #f1f5f9;
+  padding: 0.28rem;
+  border-radius: 10px;
+  margin-bottom: 1.25rem;
+}
+
+.date-mode-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.5rem 0.75rem;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.date-mode-toggle-btn.active {
+  background: #ffffff;
+  color: #0f172a;
+  font-weight: 700;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+}
+
+.date-filter-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.quick-date-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.quick-date-pill {
+  padding: 0.35rem 0.75rem;
+  border-radius: 20px;
+  border: 1px solid var(--border-light);
+  background: #ffffff;
+  color: #475569;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.quick-date-pill:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+.quick-date-pill.active {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #e11d24;
+  font-weight: 700;
+}
+
+.date-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.date-input-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.date-picker-input {
+  width: 100%;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #0f172a;
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  outline: none;
+  transition: all 0.15s ease;
+}
+
+.date-picker-input:focus {
+  background: #ffffff;
+  border-color: #e11d24;
+  box-shadow: 0 0 0 3px rgba(225, 29, 36, 0.1);
+}
+
+.date-range-inputs-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.date-filter-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  background: #f8fafc;
+  border-top: 1px solid var(--border-light);
+  gap: 0.75rem;
+}
+
+.date-modal-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.btn-date-reset {
+  background: transparent;
+  border: 1px solid var(--border-light);
+  color: #64748b;
+  border-radius: 8px;
+  padding: 0.48rem 0.85rem;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-date-reset:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.btn-date-cancel {
+  background: #ffffff;
+  border: 1px solid var(--border-light);
+  color: #334155;
+  border-radius: 8px;
+  padding: 0.48rem 0.95rem;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-date-cancel:hover {
+  background: #f1f5f9;
+}
+
+.btn-date-apply {
+  background: #e11d24;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.48rem 1.15rem;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(225, 29, 36, 0.25);
+  transition: background 0.15s ease;
+}
+
+.btn-date-apply:hover {
+  background: #c8141a;
+}
+
+/* Responsive adjustments for pagination & date filter */
+@media (max-width: 768px) {
+  .table-pagination-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+  }
+
+  .pagination-controls {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .pagination-nav-group {
+    margin-left: auto;
+  }
+
+  .date-range-inputs-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .btn-date-filter {
+    font-size: 0.8rem;
+    padding: 0.42rem 0.75rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .btn-date-label {
+    max-width: 110px;
+  }
+
+  .pagination-controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.65rem;
+  }
+
+  .pagination-rows-select {
+    justify-content: space-between;
+  }
+
+  .pagination-nav-group {
+    justify-content: center;
+    width: 100%;
+  }
+}

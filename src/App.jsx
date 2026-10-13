@@ -44,7 +44,12 @@ import {
   Settings,
   Activity,
   FileText,
-  Filter
+  Filter,
+  Calendar,
+  CalendarDays,
+  ChevronLeft,
+  ChevronsLeft,
+  ChevronsRight
 } from 'lucide-react';
 
 import { 
@@ -180,6 +185,23 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
   const [copiedRecordId, setCopiedRecordId] = useState(null);
+
+  // Attendance Logs Date Filter State
+  const [showDateFilterModal, setShowDateFilterModal] = useState(false);
+  const [dateFilterMode, setDateFilterMode] = useState('all'); // 'all' | 'single' | 'range'
+  const [filterSingleDate, setFilterSingleDate] = useState(''); // YYYY-MM-DD
+  const [filterStartDate, setFilterStartDate] = useState(''); // YYYY-MM-DD
+  const [filterEndDate, setFilterEndDate] = useState(''); // YYYY-MM-DD
+
+  // Temp states inside Date Filter Modal
+  const [tempFilterMode, setTempFilterMode] = useState('single');
+  const [tempSingleDate, setTempSingleDate] = useState('');
+  const [tempStartDate, setTempStartDate] = useState('');
+  const [tempEndDate, setTempEndDate] = useState('');
+
+  // Attendance Logs Pagination State
+  const [logPage, setLogPage] = useState(1);
+  const [logPageSize, setLogPageSize] = useState(10);
 
   // Quick Attendance History Drawer
   const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
@@ -1207,11 +1229,116 @@ export default function App() {
     }
   };
 
+  // Helper to format Date into YYYY-MM-DD
+  const toYMD = (d) => {
+    if (!d || isNaN(d.getTime())) return '';
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const getYesterdayYMD = () => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return toYMD(d);
+  };
+
+  const formatDatePretty = (isoStr) => {
+    if (!isoStr) return '';
+    const parts = isoStr.split('-').map(Number);
+    if (parts.length !== 3) return isoStr;
+    const dateObj = new Date(parts[0], parts[1] - 1, parts[2]);
+    return dateObj.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
+  };
+
+  // Robust extractor for record date in YYYY-MM-DD format
+  const getRecordISODate = (r) => {
+    if (!r) return '';
+    if (r.timestamp && !isNaN(Number(r.timestamp))) {
+      const d = new Date(Number(r.timestamp));
+      if (!isNaN(d.getTime())) return toYMD(d);
+    }
+    if (r.id && typeof r.id === 'string' && r.id.startsWith('REC-')) {
+      const ts = Number(r.id.slice(4));
+      if (!isNaN(ts) && ts > 1600000000000) {
+        const d = new Date(ts);
+        if (!isNaN(d.getTime())) return toYMD(d);
+      }
+    }
+    if (r.created_at) {
+      const d = new Date(r.created_at);
+      if (!isNaN(d.getTime())) return toYMD(d);
+    }
+    if (r.date) {
+      const d = new Date(r.date);
+      if (!isNaN(d.getTime())) return toYMD(d);
+    }
+    return '';
+  };
+
+  const isDateFilterActive = dateFilterMode !== 'all' && (
+    (dateFilterMode === 'single' && !!filterSingleDate) ||
+    (dateFilterMode === 'range' && (!!filterStartDate || !!filterEndDate))
+  );
+
+  const dateFilterLabel = useMemo(() => {
+    if (dateFilterMode === 'single' && filterSingleDate) {
+      return formatDatePretty(filterSingleDate);
+    }
+    if (dateFilterMode === 'range') {
+      if (filterStartDate && filterEndDate) {
+        if (filterStartDate === filterEndDate) return formatDatePretty(filterStartDate);
+        return `${formatDatePretty(filterStartDate)} – ${formatDatePretty(filterEndDate)}`;
+      }
+      if (filterStartDate) return `From ${formatDatePretty(filterStartDate)}`;
+      if (filterEndDate) return `Until ${formatDatePretty(filterEndDate)}`;
+    }
+    return 'Filter by Date';
+  }, [dateFilterMode, filterSingleDate, filterStartDate, filterEndDate]);
+
+  const handleClearDateFilter = () => {
+    setDateFilterMode('all');
+    setFilterSingleDate('');
+    setFilterStartDate('');
+    setFilterEndDate('');
+    setTempSingleDate('');
+    setTempStartDate('');
+    setTempEndDate('');
+    setLogPage(1);
+  };
+
+  const handleApplyDateFilter = () => {
+    if (tempFilterMode === 'single') {
+      if (!tempSingleDate) {
+        alert('Please select a date.');
+        return;
+      }
+      setDateFilterMode('single');
+      setFilterSingleDate(tempSingleDate);
+    } else if (tempFilterMode === 'range') {
+      if (!tempStartDate && !tempEndDate) {
+        alert('Please select at least a start or end date.');
+        return;
+      }
+      if (tempStartDate && tempEndDate && tempStartDate > tempEndDate) {
+        alert('Start date cannot be after end date.');
+        return;
+      }
+      setDateFilterMode('range');
+      setFilterStartDate(tempStartDate);
+      setFilterEndDate(tempEndDate);
+    }
+    setLogPage(1);
+    setShowDateFilterModal(false);
+  };
+
   // Export records to CSV
   const exportToCSV = () => {
-    if (records.length === 0) return;
+    const recordsToExport = filteredRecords.length > 0 ? filteredRecords : records;
+    if (recordsToExport.length === 0) return;
     const headers = ['Record ID', 'Employee Name', 'Role', 'Branch Name', 'Action', 'Date', 'Time', 'Geofence Verified', 'Distance (Meters)', 'Latitude', 'Longitude', 'Place Name', 'Google Maps URL'];
-    const rows = records.map((r) => [
+    const rows = recordsToExport.map((r) => [
       `"${r.id}"`,
       `"${r.employeeName}"`,
       `"${r.employeeRole || '-'}"`,
@@ -1231,7 +1358,8 @@ export default function App() {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `Convenio_Attendance_Logs_${new Date().toISOString().slice(0, 10)}.csv`);
+    const dateSuffix = isDateFilterActive ? `_${dateFilterLabel.replace(/[^a-zA-Z0-9]/g, '_')}` : `_${new Date().toISOString().slice(0, 10)}`;
+    link.setAttribute('download', `Convenio_Attendance_Logs${dateSuffix}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1263,6 +1391,7 @@ export default function App() {
     setTimeout(() => setCopiedRecordId(null), 2000);
   };
 
+  // Attendance Records Filtered
   const filteredRecords = useMemo(() => {
     const search = searchTerm.toLowerCase();
     return records.filter((r) => {
@@ -1273,10 +1402,38 @@ export default function App() {
         (r.location?.placeName && r.location.placeName.toLowerCase().includes(search)) ||
         (r.location?.lat && String(r.location.lat).includes(search)) ||
         (r.location?.lng && String(r.location.lng).includes(search));
+      
       const matchesType = filterType === 'all' || r.type === filterType;
-      return matchesSearch && matchesType;
+      if (!matchesSearch || !matchesType) return false;
+
+      // Date Filtering
+      if (dateFilterMode === 'single' && filterSingleDate) {
+        const recordDate = getRecordISODate(r);
+        if (recordDate !== filterSingleDate) return false;
+      } else if (dateFilterMode === 'range') {
+        const recordDate = getRecordISODate(r);
+        if (filterStartDate && recordDate && recordDate < filterStartDate) return false;
+        if (filterEndDate && recordDate && recordDate > filterEndDate) return false;
+      }
+
+      return true;
     });
-  }, [records, searchTerm, filterType]);
+  }, [records, searchTerm, filterType, dateFilterMode, filterSingleDate, filterStartDate, filterEndDate]);
+
+  // Reset page to 1 when any filter changes
+  useEffect(() => {
+    setLogPage(1);
+  }, [searchTerm, filterType, dateFilterMode, filterSingleDate, filterStartDate, filterEndDate]);
+
+  // Pagination calculations
+  const totalPages = Math.max(1, Math.ceil(filteredRecords.length / logPageSize));
+  const validLogPage = Math.min(Math.max(logPage, 1), totalPages);
+  const startIndex = (validLogPage - 1) * logPageSize;
+  const endIndex = Math.min(startIndex + logPageSize, filteredRecords.length);
+
+  const paginatedRecords = useMemo(() => {
+    return filteredRecords.slice(startIndex, endIndex);
+  }, [filteredRecords, startIndex, endIndex]);
 
   const totalEmployeesCount = useMemo(() => {
     return branches.reduce((acc, b) => acc + (b.employees ? b.employees.length : 0), 0);
@@ -2094,6 +2251,35 @@ export default function App() {
                 </div>
 
                 <div className="toolbar-right-actions">
+                  {/* Date Filter Button */}
+                  <button 
+                    id="btn-date-filter"
+                    className={`btn-date-filter ${isDateFilterActive ? 'active' : ''}`}
+                    onClick={() => {
+                      setTempFilterMode(dateFilterMode === 'all' ? 'single' : dateFilterMode);
+                      setTempSingleDate(filterSingleDate || toYMD(new Date()));
+                      setTempStartDate(filterStartDate);
+                      setTempEndDate(filterEndDate);
+                      setShowDateFilterModal(true);
+                    }}
+                    title="Filter logs by specific date or date range"
+                  >
+                    <Calendar size={15} />
+                    <span className="btn-date-label">{dateFilterLabel}</span>
+                    {isDateFilterActive && (
+                      <span 
+                        className="btn-date-clear-inline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleClearDateFilter();
+                        }}
+                        title="Clear date filter"
+                      >
+                        <X size={12} />
+                      </span>
+                    )}
+                  </button>
+
                   <div className="filter-pill-group">
                     <button 
                       className={`filter-pill ${filterType === 'all' ? 'active' : ''}`}
@@ -2120,7 +2306,7 @@ export default function App() {
                       id="export-csv-btn"
                       className="btn-export-csv" 
                       onClick={exportToCSV}
-                      disabled={records.length === 0}
+                      disabled={filteredRecords.length === 0}
                       title="Download Attendance CSV"
                     >
                       <FileSpreadsheet size={16} />
@@ -2141,15 +2327,41 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Active Date Filter Banner */}
+              {isDateFilterActive && (
+                <div className="active-date-filter-banner">
+                  <div className="filter-banner-info">
+                    <Calendar size={15} className="banner-cal-icon" />
+                    <span>
+                      Filtered by <strong>{dateFilterLabel}</strong>: <strong>{filteredRecords.length}</strong> matching {filteredRecords.length === 1 ? 'record' : 'records'} found
+                    </span>
+                  </div>
+                  <button className="btn-clear-date-banner" onClick={handleClearDateFilter} title="Reset date filter">
+                    <X size={13} />
+                    <span>Clear Date Filter</span>
+                  </button>
+                </div>
+              )}
+
               {/* Records Table */}
               {filteredRecords.length === 0 ? (
                 <div className="admin-empty-state">
                   <Clock size={48} color="#cbd5e1" />
                   <h3>No Attendance Records Found</h3>
-                  <p>When staff members select their branch & take selfie attendance, verified records will appear here.</p>
-                  <button className="btn-go-portal" onClick={() => navigateTo('attendance')}>
-                    Go to Attendance Portal
-                  </button>
+                  <p>
+                    {isDateFilterActive 
+                      ? `No attendance records match the selected date filter (${dateFilterLabel}).` 
+                      : 'When staff members select their branch & take selfie attendance, verified records will appear here.'}
+                  </p>
+                  {isDateFilterActive ? (
+                    <button className="btn-go-portal" onClick={handleClearDateFilter}>
+                      Clear Date Filter
+                    </button>
+                  ) : (
+                    <button className="btn-go-portal" onClick={() => navigateTo('attendance')}>
+                      Go to Attendance Portal
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="records-table-container">
@@ -2166,7 +2378,7 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredRecords.map((item) => (
+                      {paginatedRecords.map((item) => (
                         <tr 
                           key={item.id} 
                           className="table-record-row"
@@ -2275,6 +2487,83 @@ export default function App() {
                       ))}
                     </tbody>
                   </table>
+
+                  {/* Pagination Bar */}
+                  {filteredRecords.length > 0 && (
+                    <div className="table-pagination-bar">
+                      <div className="pagination-info">
+                        <span>
+                          Showing <strong>{startIndex + 1}</strong> – <strong>{endIndex}</strong> of <strong>{filteredRecords.length}</strong> logs
+                        </span>
+                      </div>
+
+                      <div className="pagination-controls">
+                        {/* Rows per page selector */}
+                        <div className="pagination-rows-select">
+                          <label htmlFor="log-page-size-select">Rows per page:</label>
+                          <select 
+                            id="log-page-size-select"
+                            value={logPageSize}
+                            onChange={(e) => {
+                              setLogPageSize(Number(e.target.value));
+                              setLogPage(1);
+                            }}
+                            className="page-size-dropdown"
+                          >
+                            <option value={10}>10</option>
+                            <option value={20}>20</option>
+                            <option value={50}>50</option>
+                            <option value={100}>100</option>
+                          </select>
+                        </div>
+
+                        {/* Page Navigation Buttons */}
+                        <div className="pagination-nav-group">
+                          <button
+                            id="btn-page-first"
+                            className="btn-page-nav"
+                            disabled={validLogPage <= 1}
+                            onClick={() => setLogPage(1)}
+                            title="First page"
+                          >
+                            <ChevronsLeft size={16} />
+                          </button>
+                          <button
+                            id="btn-page-prev"
+                            className="btn-page-nav"
+                            disabled={validLogPage <= 1}
+                            onClick={() => setLogPage(prev => Math.max(prev - 1, 1))}
+                            title="Previous page"
+                          >
+                            <ChevronLeft size={16} />
+                          </button>
+
+                          <div className="pagination-page-indicator">
+                            Page <strong>{validLogPage}</strong> of <strong>{totalPages}</strong>
+                          </div>
+
+                          <button
+                            id="btn-page-next"
+                            className="btn-page-nav"
+                            disabled={validLogPage >= totalPages}
+                            onClick={() => setLogPage(prev => Math.min(prev + 1, totalPages))}
+                            title="Next page"
+                          >
+                            <ChevronRight size={16} />
+                          </button>
+                          <button
+                            id="btn-page-last"
+                            className="btn-page-nav"
+                            disabled={validLogPage >= totalPages}
+                            onClick={() => setLogPage(totalPages)}
+                            title="Last page"
+                          >
+                            <ChevronsRight size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -3462,6 +3751,209 @@ export default function App() {
                       <span>Copy SQL Script</span>
                     </>
                   )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL: DATE FILTER (SPECIFIC DATE & RANGE) ================= */}
+      {showDateFilterModal && (
+        <div className="modal-overlay" onClick={() => setShowDateFilterModal(false)}>
+          <div className="modal-content date-filter-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="date-filter-modal-header">
+              <div className="date-filter-modal-title">
+                <div className="icon-calendar-badge">
+                  <Calendar size={18} />
+                </div>
+                <div>
+                  <h3>Filter Logs by Date</h3>
+                  <p>Choose a single date or custom range to filter attendance records</p>
+                </div>
+              </div>
+              <button 
+                className="icon-close-btn" 
+                onClick={() => setShowDateFilterModal(false)}
+                aria-label="Close date filter modal"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="date-filter-modal-body">
+              {/* Filter Mode Selector */}
+              <div className="date-mode-toggle-group">
+                <button
+                  type="button"
+                  className={`date-mode-toggle-btn ${tempFilterMode === 'single' ? 'active' : ''}`}
+                  onClick={() => setTempFilterMode('single')}
+                >
+                  <Calendar size={15} />
+                  <span>Specific Date</span>
+                </button>
+                <button
+                  type="button"
+                  className={`date-mode-toggle-btn ${tempFilterMode === 'range' ? 'active' : ''}`}
+                  onClick={() => setTempFilterMode('range')}
+                >
+                  <CalendarDays size={15} />
+                  <span>Date Range</span>
+                </button>
+              </div>
+
+              {/* Mode 1: Specific Date */}
+              {tempFilterMode === 'single' && (
+                <div className="date-filter-section">
+                  <label className="date-input-label">Quick Selection</label>
+                  <div className="quick-date-pills">
+                    <button
+                      type="button"
+                      className={`quick-date-pill ${tempSingleDate === toYMD(new Date()) ? 'active' : ''}`}
+                      onClick={() => setTempSingleDate(toYMD(new Date()))}
+                    >
+                      Today
+                    </button>
+                    <button
+                      type="button"
+                      className={`quick-date-pill ${tempSingleDate === getYesterdayYMD() ? 'active' : ''}`}
+                      onClick={() => setTempSingleDate(getYesterdayYMD())}
+                    >
+                      Yesterday
+                    </button>
+                  </div>
+
+                  <div className="date-input-group">
+                    <label htmlFor="input-single-date" className="date-input-label">Select Date:</label>
+                    <input
+                      id="input-single-date"
+                      type="date"
+                      value={tempSingleDate}
+                      onChange={(e) => setTempSingleDate(e.target.value)}
+                      className="date-picker-input"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Mode 2: Date Range */}
+              {tempFilterMode === 'range' && (
+                <div className="date-filter-section">
+                  <label className="date-input-label">Quick Presets</label>
+                  <div className="quick-date-pills">
+                    <button
+                      type="button"
+                      className="quick-date-pill"
+                      onClick={() => {
+                        const today = toYMD(new Date());
+                        setTempStartDate(today);
+                        setTempEndDate(today);
+                      }}
+                    >
+                      Today
+                    </button>
+                    <button
+                      type="button"
+                      className="quick-date-pill"
+                      onClick={() => {
+                        const yest = getYesterdayYMD();
+                        setTempStartDate(yest);
+                        setTempEndDate(yest);
+                      }}
+                    >
+                      Yesterday
+                    </button>
+                    <button
+                      type="button"
+                      className="quick-date-pill"
+                      onClick={() => {
+                        const today = toYMD(new Date());
+                        const past7 = new Date();
+                        past7.setDate(past7.getDate() - 6);
+                        setTempStartDate(toYMD(past7));
+                        setTempEndDate(today);
+                      }}
+                    >
+                      Last 7 Days
+                    </button>
+                    <button
+                      type="button"
+                      className="quick-date-pill"
+                      onClick={() => {
+                        const today = toYMD(new Date());
+                        const past30 = new Date();
+                        past30.setDate(past30.getDate() - 29);
+                        setTempStartDate(toYMD(past30));
+                        setTempEndDate(today);
+                      }}
+                    >
+                      Last 30 Days
+                    </button>
+                    <button
+                      type="button"
+                      className="quick-date-pill"
+                      onClick={() => {
+                        const now = new Date();
+                        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+                        setTempStartDate(toYMD(firstDay));
+                        setTempEndDate(toYMD(now));
+                      }}
+                    >
+                      This Month
+                    </button>
+                  </div>
+
+                  <div className="date-range-inputs-grid">
+                    <div className="date-input-group">
+                      <label htmlFor="input-start-date" className="date-input-label">From Date (Start):</label>
+                      <input
+                        id="input-start-date"
+                        type="date"
+                        value={tempStartDate}
+                        onChange={(e) => setTempStartDate(e.target.value)}
+                        className="date-picker-input"
+                      />
+                    </div>
+                    <div className="date-input-group">
+                      <label htmlFor="input-end-date" className="date-input-label">To Date (End):</label>
+                      <input
+                        id="input-end-date"
+                        type="date"
+                        value={tempEndDate}
+                        onChange={(e) => setTempEndDate(e.target.value)}
+                        className="date-picker-input"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="date-filter-modal-footer">
+              <button
+                type="button"
+                className="btn-date-reset"
+                onClick={() => {
+                  handleClearDateFilter();
+                  setShowDateFilterModal(false);
+                }}
+              >
+                Clear / All Dates
+              </button>
+              <div className="date-modal-footer-right">
+                <button
+                  type="button"
+                  className="btn-date-cancel"
+                  onClick={() => setShowDateFilterModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn-date-apply"
+                  onClick={handleApplyDateFilter}
+                >
+                  Apply Filter
                 </button>
               </div>
             </div>
