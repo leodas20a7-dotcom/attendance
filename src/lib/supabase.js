@@ -43,15 +43,35 @@ CREATE TABLE IF NOT EXISTS public.attendance_records (
   created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 4. Enable Row Level Security (RLS)
+-- 4. Managers Table (Admin Created Store Managers)
+CREATE TABLE IF NOT EXISTS public.managers (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  role TEXT,
+  username TEXT UNIQUE NOT NULL,
+  password TEXT NOT NULL,
+  email TEXT,
+  created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 5. Enable Row Level Security (RLS)
 ALTER TABLE public.branches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.employees ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.attendance_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.managers ENABLE ROW LEVEL SECURITY;
 
--- 5. Allow Public (anon) Read/Write Access
+-- 6. Allow Public (anon) Read/Write Access
+DROP POLICY IF EXISTS "Public full access to branches" ON public.branches;
 CREATE POLICY "Public full access to branches" ON public.branches FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public full access to employees" ON public.employees;
 CREATE POLICY "Public full access to employees" ON public.employees FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public full access to attendance_records" ON public.attendance_records;
 CREATE POLICY "Public full access to attendance_records" ON public.attendance_records FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public full access to managers" ON public.managers;
+CREATE POLICY "Public full access to managers" ON public.managers FOR ALL USING (true) WITH CHECK (true);
 `;
 
 /**
@@ -282,3 +302,59 @@ export async function clearAllAttendanceFromSupabase() {
     return false;
   }
 }
+
+/**
+ * Fetch all managers from Supabase
+ */
+export async function fetchManagersFromSupabase() {
+  try {
+    const { data, error } = await supabase
+      .from('managers')
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    if (error || !data) return null;
+
+    return data.map(m => ({
+      id: m.id,
+      name: m.name,
+      role: m.role || 'Store Manager',
+      username: m.username,
+      password: m.password,
+      email: m.email || ''
+    }));
+  } catch (err) {
+    console.warn('Error fetching managers from Supabase:', err);
+    return null;
+  }
+}
+
+/**
+ * Insert or update a manager in Supabase
+ */
+export async function syncManagerToSupabase(manager) {
+  try {
+    await supabase.from('managers').upsert({
+      id: manager.id,
+      name: manager.name,
+      role: manager.role || 'Store Manager',
+      username: manager.username,
+      password: manager.password,
+      email: manager.email || ''
+    });
+  } catch (err) {
+    console.warn('Failed to sync manager to Supabase:', err);
+  }
+}
+
+/**
+ * Delete a manager from Supabase
+ */
+export async function removeManagerFromSupabase(managerId) {
+  try {
+    await supabase.from('managers').delete().eq('id', managerId);
+  } catch (err) {
+    console.warn('Failed to delete manager from Supabase:', err);
+  }
+}
+

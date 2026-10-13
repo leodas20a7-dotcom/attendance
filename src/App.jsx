@@ -85,6 +85,9 @@ import {
   fetchAttendanceFromSupabase, 
   saveAttendanceToSupabase,
   clearAllAttendanceFromSupabase,
+  fetchManagersFromSupabase,
+  syncManagerToSupabase,
+  removeManagerFromSupabase,
   SUPABASE_SCHEMA_SQL
 } from './lib/supabase';
 
@@ -358,10 +361,11 @@ export default function App() {
         setSupabaseStatus(status);
 
         if (status.tablesReady) {
-          // Concurrently fetch branches & attendance records from Supabase
-          const [cloudBranches, cloudRecords] = await Promise.all([
+          // Concurrently fetch branches, attendance records & managers from Supabase
+          const [cloudBranches, cloudRecords, cloudManagers] = await Promise.all([
             fetchBranchesFromSupabase(),
-            fetchAttendanceFromSupabase()
+            fetchAttendanceFromSupabase(),
+            fetchManagersFromSupabase()
           ]);
 
           if (cloudBranches && cloudBranches.length > 0) {
@@ -382,6 +386,11 @@ export default function App() {
             } catch (e) {
               console.warn('Failed to cache cloud records:', e);
             }
+          }
+
+          if (cloudManagers && Array.isArray(cloudManagers) && cloudManagers.length > 0) {
+            setManagersList(cloudManagers);
+            saveStoredManagers(cloudManagers);
           }
         }
       } catch (err) {
@@ -738,6 +747,7 @@ export default function App() {
     const updated = [...managersList, newMgr];
     setManagersList(updated);
     saveStoredManagers(updated);
+    syncManagerToSupabase(newMgr);
     setNewManagerName('');
     setNewManagerRole('');
     setNewManagerUsername('');
@@ -764,6 +774,7 @@ export default function App() {
       const updated = managersList.filter(m => m.id !== mgrId);
       setManagersList(updated);
       saveStoredManagers(updated);
+      removeManagerFromSupabase(mgrId);
       logAdminAction('manager_removed', `Removed manager "${mgr.name}"`, {
         managerName: mgr.name
       });
@@ -2854,83 +2865,91 @@ export default function App() {
               </div>
 
               {/* Managers Grid */}
-              <div className="managers-grid-container">
-                {managersList.map((mgr) => (
-                  <div key={mgr.id} className="manager-directory-card">
-                    <div className="mgr-card-top">
-                      <div className="mgr-avatar-circle">
-                        {mgr.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                      </div>
-                      <div className="mgr-card-meta">
-                        <div className="mgr-name-row">
-                          <strong className="mgr-name">{mgr.name}</strong>
-                          <span className="mgr-role-badge">{mgr.role || 'Store Manager'}</span>
+              {managersList.length === 0 ? (
+                <div className="empty-sub-state" style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '2.5rem 1rem' }}>
+                  <Users size={40} color="#cbd5e1" />
+                  <p style={{ fontWeight: 600, color: '#334155', marginTop: '0.5rem' }}>No store managers created yet.</p>
+                  <span className="sub-helper">Click "+ Add New Manager" above to create manager accounts with custom username & password.</span>
+                </div>
+              ) : (
+                <div className="managers-grid-container">
+                  {managersList.map((mgr) => (
+                    <div key={mgr.id} className="manager-directory-card">
+                      <div className="mgr-card-top">
+                        <div className="mgr-avatar-circle">
+                          {mgr.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
                         </div>
-                        <span className="mgr-email-label">{mgr.email || 'manager@convenio.in'}</span>
-                      </div>
-                    </div>
-
-                    <div className="mgr-creds-strip">
-                      <div className="mgr-cred-row">
-                        <span className="mgr-cred-key">Username:</span>
-                        <code className="mgr-cred-val">{mgr.username || mgr.name.toLowerCase().replace(/\s+/g, '')}</code>
-                      </div>
-                      <div className="mgr-cred-row">
-                        <span className="mgr-cred-key">Password:</span>
-                        <div className="mgr-pass-inline">
-                          <code className="mgr-cred-val">
-                            {visiblePasswords[mgr.id] ? (mgr.password || 'mgr@2018') : '••••••••'}
-                          </code>
-                          <button
-                            type="button"
-                            className="btn-toggle-mgr-pass"
-                            onClick={() => setVisiblePasswords(prev => ({ ...prev, [mgr.id]: !prev[mgr.id] }))}
-                            title={visiblePasswords[mgr.id] ? 'Hide password' : 'Show password'}
-                          >
-                            {visiblePasswords[mgr.id] ? <EyeOff size={13} /> : <Eye size={13} />}
-                          </button>
+                        <div className="mgr-card-meta">
+                          <div className="mgr-name-row">
+                            <strong className="mgr-name">{mgr.name}</strong>
+                            <span className="mgr-role-badge">{mgr.role || 'Store Manager'}</span>
+                          </div>
+                          <span className="mgr-email-label">{mgr.email || 'manager@convenio.in'}</span>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="mgr-card-actions">
-                      <button 
-                        type="button"
-                        className="btn-mgr-copy-creds"
-                        onClick={() => {
-                          const userVal = mgr.username || mgr.name.toLowerCase().replace(/\s+/g, '');
-                          const passVal = mgr.password || 'mgr@2018';
-                          const text = `Convenio Mart Store Manager Login:\nUsername: ${userVal}\nPassword: ${passVal}`;
-                          navigator.clipboard.writeText(text);
-                          setCopiedManagerId(mgr.id);
-                          setTimeout(() => setCopiedManagerId(null), 2500);
-                        }}
-                        title="Copy credentials to share with manager"
-                      >
-                        {copiedManagerId === mgr.id ? (
-                          <>
-                            <Check size={14} color="#10b981" />
-                            <span>Copied!</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy size={14} />
-                            <span>Copy Login Info</span>
-                          </>
-                        )}
-                      </button>
-                      <button 
-                        type="button"
-                        className="btn-mgr-delete"
-                        onClick={() => handleRemoveManager(mgr.id)}
-                        title="Remove manager"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      <div className="mgr-creds-strip">
+                        <div className="mgr-cred-row">
+                          <span className="mgr-cred-key">Username:</span>
+                          <code className="mgr-cred-val">{mgr.username || mgr.name.toLowerCase().replace(/\s+/g, '')}</code>
+                        </div>
+                        <div className="mgr-cred-row">
+                          <span className="mgr-cred-key">Password:</span>
+                          <div className="mgr-pass-inline">
+                            <code className="mgr-cred-val">
+                              {visiblePasswords[mgr.id] ? (mgr.password || 'mgr@2018') : '••••••••'}
+                            </code>
+                            <button
+                              type="button"
+                              className="btn-toggle-mgr-pass"
+                              onClick={() => setVisiblePasswords(prev => ({ ...prev, [mgr.id]: !prev[mgr.id] }))}
+                              title={visiblePasswords[mgr.id] ? 'Hide password' : 'Show password'}
+                            >
+                              {visiblePasswords[mgr.id] ? <EyeOff size={13} /> : <Eye size={13} />}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mgr-card-actions">
+                        <button 
+                          type="button"
+                          className="btn-mgr-copy-creds"
+                          onClick={() => {
+                            const userVal = mgr.username || mgr.name.toLowerCase().replace(/\s+/g, '');
+                            const passVal = mgr.password || 'mgr@2018';
+                            const text = `Convenio Mart Store Manager Login:\nUsername: ${userVal}\nPassword: ${passVal}`;
+                            navigator.clipboard.writeText(text);
+                            setCopiedManagerId(mgr.id);
+                            setTimeout(() => setCopiedManagerId(null), 2500);
+                          }}
+                          title="Copy credentials to share with manager"
+                        >
+                          {copiedManagerId === mgr.id ? (
+                            <>
+                              <Check size={14} color="#10b981" />
+                              <span>Copied!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy size={14} />
+                              <span>Copy Login Info</span>
+                            </>
+                          )}
+                        </button>
+                        <button 
+                          type="button"
+                          className="btn-mgr-delete"
+                          onClick={() => handleRemoveManager(mgr.id)}
+                          title="Remove manager"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
 
               {/* Recent Staff Transfers Audit Trail */}
               <div className="transfers-audit-section">
