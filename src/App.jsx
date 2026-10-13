@@ -2040,7 +2040,6 @@ export default function App() {
                         type="email"
                         required
                         autoComplete="username"
-                        placeholder="hr@lordsandkings.co"
                         value={adminUsername}
                         onChange={(e) => {
                           setAdminUsername(e.target.value);
@@ -2059,7 +2058,6 @@ export default function App() {
                         type="text"
                         required
                         autoComplete="username"
-                        placeholder="Enter your assigned username (e.g. rajesh)"
                         value={adminUsername}
                         onChange={(e) => {
                           setAdminUsername(e.target.value);
@@ -2081,7 +2079,6 @@ export default function App() {
                       type={showAdminPassword ? 'text' : 'password'}
                       required
                       autoComplete="current-password"
-                      placeholder={loginRoleTab === 'manager' ? 'Enter your manager password' : 'Enter admin password'}
                       value={adminPassword}
                       onChange={(e) => {
                         setAdminPassword(e.target.value);
