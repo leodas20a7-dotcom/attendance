@@ -343,6 +343,7 @@ export default function App() {
   const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
   const [historySearchTerm, setHistorySearchTerm] = useState('');
   const [historyFilterType, setHistoryFilterType] = useState('all');
+  const [historyScope, setHistoryScope] = useState('employee'); // 'employee' or 'all'
 
   // ================= ADMIN BRANCH & EMPLOYEE EDIT STATE =================
   const [adminSelectedBranchId, setAdminSelectedBranchId] = useState(() => {
@@ -745,6 +746,28 @@ export default function App() {
         return matchesEmp && isRecordToday(r);
       })
     : null;
+
+  // All today's attendance records across all staff
+  const todayRecords = useMemo(() => {
+    return records.filter(isRecordToday);
+  }, [records, isRecordToday]);
+
+  // Today's attendance records for the currently selected employee
+  const currentEmployeeTodayRecords = useMemo(() => {
+    if (!activeFormEmpName) return [];
+    const targetName = activeFormEmpName.trim().toLowerCase();
+    return todayRecords.filter(r => {
+      const empName = (r.employeeName || r.name || '').trim().toLowerCase();
+      return empName === targetName || empName.includes(targetName) || targetName.includes(empName);
+    });
+  }, [todayRecords, activeFormEmpName]);
+
+  const handleOpenHistoryDrawer = () => {
+    setHistoryScope(activeFormEmpName ? 'employee' : 'all');
+    setHistorySearchTerm('');
+    setHistoryFilterType('all');
+    setShowHistoryDrawer(true);
+  };
 
   // Active branch in Admin Management
   const currentAdminBranch = branches.find(b => b.id === adminSelectedBranchId) || branches[0];
@@ -1801,14 +1824,14 @@ export default function App() {
             <button
               id="header-history-btn"
               className="history-nav-trigger-btn"
-              onClick={() => setShowHistoryDrawer(true)}
-              title="View Staff Check-In & Check-Out History"
-              aria-label="View Staff Check-In and Check-Out History"
+              onClick={handleOpenHistoryDrawer}
+              title="View Today's Check-In & Check-Out History"
+              aria-label="View Today's Check-In and Check-Out History"
             >
               <History size={16} className="history-icon" />
               <span>History</span>
-              {records.length > 0 && (
-                <span className="history-badge-count">{records.length}</span>
+              {todayRecords.length > 0 && (
+                <span className="history-badge-count">{todayRecords.length}</span>
               )}
             </button>
           </div>
@@ -3150,7 +3173,9 @@ export default function App() {
                 <div>
                   <h2 className="history-drawer-title">Attendance History</h2>
                   <p className="history-drawer-subtitle">
-                    Recent check-in and check-out logs
+                    {activeFormEmpName && historyScope === 'employee'
+                      ? `Today's check-in & check-out logs for ${activeFormEmpName}`
+                      : "Today's check-in and check-out activity"}
                   </p>
                 </div>
               </div>
@@ -3166,6 +3191,28 @@ export default function App() {
 
             {/* Quick Filters & Search */}
             <div className="history-drawer-controls">
+              {/* Scope Switcher: Employee's Today Punches vs Store-Wide Today */}
+              {activeFormEmpName && (
+                <div className="history-scope-switcher">
+                  <button
+                    type="button"
+                    className={`history-scope-btn ${historyScope === 'employee' ? 'active' : ''}`}
+                    onClick={() => setHistoryScope('employee')}
+                  >
+                    <User size={13} />
+                    <span>My Punches Today ({currentEmployeeTodayRecords.length})</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`history-scope-btn ${historyScope === 'all' ? 'active' : ''}`}
+                    onClick={() => setHistoryScope('all')}
+                  >
+                    <Store size={13} />
+                    <span>All Today ({todayRecords.length})</span>
+                  </button>
+                </div>
+              )}
+
               <div className="history-search-wrapper">
                 <Search size={15} className="history-search-icon" />
                 <input
@@ -3185,135 +3232,147 @@ export default function App() {
                 )}
               </div>
 
-              <div className="history-tabs-row">
-                <button
-                  className={`history-filter-chip ${historyFilterType === 'all' ? 'active' : ''}`}
-                  onClick={() => setHistoryFilterType('all')}
-                >
-                  All ({records.length})
-                </button>
-                <button
-                  className={`history-filter-chip chip-in ${historyFilterType === 'in' ? 'active' : ''}`}
-                  onClick={() => setHistoryFilterType('in')}
-                >
-                  Check In ({records.filter(r => r.type === 'in').length})
-                </button>
-                <button
-                  className={`history-filter-chip chip-out ${historyFilterType === 'out' ? 'active' : ''}`}
-                  onClick={() => setHistoryFilterType('out')}
-                >
-                  Check Out ({records.filter(r => r.type === 'out').length})
-                </button>
-              </div>
+              {(() => {
+                const baseList = (activeFormEmpName && historyScope === 'employee')
+                  ? currentEmployeeTodayRecords
+                  : todayRecords;
+                const inCount = baseList.filter(r => r.type === 'in').length;
+                const outCount = baseList.filter(r => r.type === 'out').length;
+
+                return (
+                  <div className="history-tabs-row">
+                    <button
+                      className={`history-filter-chip ${historyFilterType === 'all' ? 'active' : ''}`}
+                      onClick={() => setHistoryFilterType('all')}
+                    >
+                      All ({baseList.length})
+                    </button>
+                    <button
+                      className={`history-filter-chip chip-in ${historyFilterType === 'in' ? 'active' : ''}`}
+                      onClick={() => setHistoryFilterType('in')}
+                    >
+                      Check In ({inCount})
+                    </button>
+                    <button
+                      className={`history-filter-chip chip-out ${historyFilterType === 'out' ? 'active' : ''}`}
+                      onClick={() => setHistoryFilterType('out')}
+                    >
+                      Check Out ({outCount})
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* History List */}
-            <div className="history-drawer-list">
-              {records
-                .filter((r) => {
-                  const s = historySearchTerm.toLowerCase();
-                  const matchesSearch = 
-                    !s || 
-                    r.employeeName.toLowerCase().includes(s) || 
-                    (r.branchName && r.branchName.toLowerCase().includes(s));
-                  const matchesType = historyFilterType === 'all' || r.type === historyFilterType;
-                  return matchesSearch && matchesType;
-                })
-                .length === 0 ? (
-                <div className="history-empty-state">
-                  <Clock size={36} className="history-empty-icon" />
-                  <h4>No logs recorded yet</h4>
-                  <p>
-                    {historySearchTerm 
-                      ? 'No matching attendance records found for this search.' 
-                      : 'Check-in and check-out logs will show up here in real time.'}
-                  </p>
-                </div>
-              ) : (
-                records
-                  .filter((r) => {
-                    const s = historySearchTerm.toLowerCase();
-                    const matchesSearch = 
-                      !s || 
-                      r.employeeName.toLowerCase().includes(s) || 
-                      (r.branchName && r.branchName.toLowerCase().includes(s));
-                    const matchesType = historyFilterType === 'all' || r.type === historyFilterType;
-                    return matchesSearch && matchesType;
-                  })
-                  .map((item) => (
-                    <div 
-                      key={item.id} 
-                      className="history-log-card"
-                      onClick={() => setSelectedRecord({ ...item, disablePhotoZoom: true })}
-                      role="button"
-                      tabIndex={0}
-                      title="Click to view full attendance verification receipt"
-                    >
-                      <div className="history-log-avatar">
-                        {item.photo ? (
-                          <img src={item.photo} alt={item.employeeName} className="history-log-thumb" loading="lazy" decoding="async" width="38" height="38" />
-                        ) : (
-                          <span className="history-log-initial">
-                            {item.employeeName ? item.employeeName.charAt(0).toUpperCase() : 'U'}
-                          </span>
-                        )}
+            {(() => {
+              const baseList = (activeFormEmpName && historyScope === 'employee')
+                ? currentEmployeeTodayRecords
+                : todayRecords;
+
+              const filteredList = baseList.filter((r) => {
+                const s = historySearchTerm.toLowerCase();
+                const matchesSearch = 
+                  !s || 
+                  r.employeeName.toLowerCase().includes(s) || 
+                  (r.branchName && r.branchName.toLowerCase().includes(s));
+                const matchesType = historyFilterType === 'all' || r.type === historyFilterType;
+                return matchesSearch && matchesType;
+              });
+
+              return (
+                <>
+                  <div className="history-drawer-list">
+                    {filteredList.length === 0 ? (
+                      <div className="history-empty-state">
+                        <Clock size={36} className="history-empty-icon" />
+                        <h4>No logs recorded today</h4>
+                        <p>
+                          {historySearchTerm 
+                            ? 'No matching attendance records found for this search today.' 
+                            : (activeFormEmpName && historyScope === 'employee')
+                            ? `No attendance logs marked yet today for ${activeFormEmpName}.`
+                            : "Today's check-in and check-out logs will show up here in real time."}
+                        </p>
                       </div>
-
-                      <div className="history-log-main">
-                        {/* Row 1: Employee Name & Action Pill */}
-                        <div className="history-log-header-row">
-                          <strong className="history-log-name">{item.employeeName}</strong>
-                          <div className={`history-action-pill ${item.type === 'in' ? 'pill-in' : 'pill-out'}`}>
-                            {item.type === 'in' ? <LogIn size={11} /> : <LogOut size={11} />}
-                            <span>{item.type === 'in' ? 'Check In' : 'Check Out'}</span>
-                          </div>
-                        </div>
-
-                        {/* Row 2: Branch Name & On-Site Badge */}
-                        {item.branchName && (
-                          <div className="history-log-branch-row">
-                            <span className="history-log-branch-name">
-                              <MapPin size={11} />
-                              <span>{item.branchName}</span>
-                            </span>
-                            {item.geofenceVerified && (
-                              <span className="history-on-site-tag" title="Verified within 50m of branch">
-                                <ShieldCheck size={11} />
-                                <span>On-Site{item.distanceMeters != null ? ` (${item.distanceMeters}m)` : ''}</span>
+                    ) : (
+                      filteredList.map((item) => (
+                        <div 
+                          key={item.id} 
+                          className="history-log-card"
+                          onClick={() => setSelectedRecord({ ...item, disablePhotoZoom: true })}
+                          role="button"
+                          tabIndex={0}
+                          title="Click to view full attendance verification receipt"
+                        >
+                          <div className="history-log-avatar">
+                            {item.photo ? (
+                              <img src={item.photo} alt={item.employeeName} className="history-log-thumb" loading="lazy" decoding="async" width="38" height="38" />
+                            ) : (
+                              <span className="history-log-initial">
+                                {item.employeeName ? item.employeeName.charAt(0).toUpperCase() : 'U'}
                               </span>
                             )}
                           </div>
-                        )}
 
-                        {/* Row 3: Punch Time & Date */}
-                        <div className="history-log-meta-row">
-                          <span className="history-log-time-chip">
-                            <Clock size={11} />
-                            <span>{formatTo12HourTime(item.time || item.shortTime)}</span>
-                          </span>
-                          <span className="history-meta-bullet">•</span>
-                          <span className="history-log-date-text">{item.date}</span>
+                          <div className="history-log-main">
+                            {/* Row 1: Employee Name & Action Pill */}
+                            <div className="history-log-header-row">
+                              <strong className="history-log-name">{item.employeeName}</strong>
+                              <div className={`history-action-pill ${item.type === 'in' ? 'pill-in' : 'pill-out'}`}>
+                                {item.type === 'in' ? <LogIn size={11} /> : <LogOut size={11} />}
+                                <span>{item.type === 'in' ? 'Check In' : 'Check Out'}</span>
+                              </div>
+                            </div>
+
+                            {/* Row 2: Branch Name & On-Site Badge */}
+                            {item.branchName && (
+                              <div className="history-log-branch-row">
+                                <span className="history-log-branch-name">
+                                  <MapPin size={11} />
+                                  <span>{item.branchName}</span>
+                                </span>
+                                {item.geofenceVerified && (
+                                  <span className="history-on-site-tag" title="Verified within 50m of branch">
+                                    <ShieldCheck size={11} />
+                                    <span>On-Site{item.distanceMeters != null ? ` (${item.distanceMeters}m)` : ''}</span>
+                                  </span>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Row 3: Punch Time & Date */}
+                            <div className="history-log-meta-row">
+                              <span className="history-log-time-chip">
+                                <Clock size={11} />
+                                <span>{formatTo12HourTime(item.time || item.shortTime)}</span>
+                              </span>
+                              <span className="history-meta-bullet">•</span>
+                              <span className="history-log-date-text">{item.date}</span>
+                            </div>
+                          </div>
+
+                          <ChevronRight size={16} className="history-log-chevron" />
                         </div>
-                      </div>
+                      ))
+                    )}
+                  </div>
 
-                      <ChevronRight size={16} className="history-log-chevron" />
-                    </div>
-                  ))
-              )}
-            </div>
-
-            {/* Drawer Footer */}
-            <div className="history-drawer-footer">
-              <span className="history-footer-count">
-                {records.length} total attendance {records.length === 1 ? 'log' : 'logs'}
-              </span>
-              <button 
-                className="history-footer-done-btn"
-                onClick={() => setShowHistoryDrawer(false)}
-              >
-                Close
-              </button>
-            </div>
+                  {/* Drawer Footer */}
+                  <div className="history-drawer-footer">
+                    <span className="history-footer-count">
+                      {filteredList.length} today's attendance {filteredList.length === 1 ? 'log' : 'logs'}
+                    </span>
+                    <button 
+                      className="history-footer-done-btn"
+                      onClick={() => setShowHistoryDrawer(false)}
+                    >
+                      Close
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}
