@@ -128,8 +128,8 @@ export const DEFAULT_BRANCHES = [
     location: 'Mogappair',
     pincode: '600095',
     address: 'Chanakyan Main Road, Annamalai Ave, Mogappair, Chennai, Tamil Nadu 600095',
-    lat: 13.073864,
-    lng: 80.169518,
+    lat: 13.073973096036442,
+    lng: 80.16952708862922,
     geofenceRadiusMeters: 50,
     employees: [
       { id: 'emp-tudoor-1', name: 'Adhithiyan' }
@@ -142,6 +142,37 @@ export const STORAGE_KEY_RECORDS = 'convenio_attendance_records';
 export const STORAGE_KEY_SELECTED_BRANCH = 'convenio_selected_branch_id';
 export const STORAGE_KEY_SELECTED_EMP = 'convenio_selected_emp_id';
 export const STORAGE_KEY_ADMIN_LOGS = 'convenio_admin_audit_logs';
+export const STORAGE_KEY_MANAGERS = 'convenio_managers_list';
+
+export const DEFAULT_MANAGERS = [
+  { id: 'mgr-1', name: 'Rajesh Kumar', email: 'rajesh@convenio.com', role: 'Area Operations Manager' },
+  { id: 'mgr-2', name: 'Suresh Raina', email: 'suresh@convenio.com', role: 'Cluster Store Manager' },
+  { id: 'mgr-3', name: 'Praveen Nathan', email: 'praveen@convenio.com', role: 'Zonal Retail Manager' }
+];
+
+export function getStoredManagers() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_MANAGERS);
+    if (!raw) {
+      localStorage.setItem(STORAGE_KEY_MANAGERS, JSON.stringify(DEFAULT_MANAGERS));
+      return DEFAULT_MANAGERS;
+    }
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    return DEFAULT_MANAGERS;
+  } catch (e) {
+    console.error('Error loading managers:', e);
+    return DEFAULT_MANAGERS;
+  }
+}
+
+export function saveStoredManagers(managers) {
+  try {
+    localStorage.setItem(STORAGE_KEY_MANAGERS, JSON.stringify(managers));
+  } catch (e) {
+    console.error('Error saving managers:', e);
+  }
+}
 
 export function getStoredAdminLogs() {
   try {

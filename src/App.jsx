@@ -65,6 +65,9 @@ import {
   saveStoredBranches, 
   getStoredAdminLogs,
   saveStoredAdminLogs,
+  DEFAULT_MANAGERS,
+  getStoredManagers,
+  saveStoredManagers,
   STORAGE_KEY_BRANCHES, 
   STORAGE_KEY_RECORDS,
   STORAGE_KEY_SELECTED_BRANCH,
@@ -113,7 +116,7 @@ export default function App() {
   const [appLoading, setAppLoading] = useState(false);
   const [loadingFadingOut, setLoadingFadingOut] = useState(false);
 
-  // Admin Authentication State (Username: hr@lordsandkings.co | Pwd: lak@2018)
+  // Admin & Manager Authentication State
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(() => {
     try {
       return sessionStorage.getItem('convenio_admin_auth') === 'true';
@@ -121,6 +124,34 @@ export default function App() {
       return false;
     }
   });
+  const [authRole, setAuthRole] = useState(() => {
+    try {
+      return sessionStorage.getItem('convenio_auth_role') || 'admin';
+    } catch {
+      return 'admin';
+    }
+  });
+  const [currentManagerName, setCurrentManagerName] = useState(() => {
+    try {
+      return sessionStorage.getItem('convenio_manager_name') || '';
+    } catch {
+      return '';
+    }
+  });
+
+  // Login Form States (Role tab: 'admin' or 'manager')
+  const [loginRoleTab, setLoginRoleTab] = useState('admin');
+  const [managersList, setManagersList] = useState(getStoredManagers);
+  const [loginSelectedManagerId, setLoginSelectedManagerId] = useState(() => {
+    const list = getStoredManagers();
+    return list.length > 0 ? list[0].id : '';
+  });
+  const [loginCustomManagerName, setLoginCustomManagerName] = useState('');
+  const [showAddManagerModal, setShowAddManagerModal] = useState(false);
+  const [newManagerName, setNewManagerName] = useState('');
+  const [newManagerRole, setNewManagerRole] = useState('');
+  const [newManagerEmail, setNewManagerEmail] = useState('');
+
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [showAdminPassword, setShowAdminPassword] = useState(false);
@@ -607,36 +638,76 @@ export default function App() {
   // Active branch in Admin Management
   const currentAdminBranch = branches.find(b => b.id === adminSelectedBranchId) || branches[0];
 
-  // ================= ADMIN AUTHENTICATION HANDLERS =================
+  // ================= ADMIN & MANAGER AUTHENTICATION HANDLERS =================
   const handleAdminLogin = (e) => {
     e.preventDefault();
     setAdminAuthError('');
     setIsAdminLoggingIn(true);
 
-    const inputUser = adminUsername.trim().toLowerCase();
-    const inputPass = adminPassword;
-
     setTimeout(() => {
-      if (inputUser === 'hr@lordsandkings.co' && inputPass === 'lak@2018') {
-        setIsAdminAuthenticated(true);
-        try {
-          sessionStorage.setItem('convenio_admin_auth', 'true');
-        } catch {
-          // ignore
+      if (loginRoleTab === 'admin') {
+        const inputUser = adminUsername.trim().toLowerCase();
+        const inputPass = adminPassword;
+
+        if (inputUser === 'hr@lordsandkings.co' && inputPass === 'lak@2018') {
+          setIsAdminAuthenticated(true);
+          setAuthRole('admin');
+          setCurrentManagerName('');
+          try {
+            sessionStorage.setItem('convenio_admin_auth', 'true');
+            sessionStorage.setItem('convenio_auth_role', 'admin');
+            sessionStorage.removeItem('convenio_manager_name');
+          } catch {
+            // ignore
+          }
+          setAdminPassword('');
+          setAdminAuthError('');
+        } else {
+          setAdminAuthError('Invalid administrator credentials. Please check your username and password.');
         }
-        setAdminPassword('');
-        setAdminAuthError('');
       } else {
-        setAdminAuthError('Invalid username or password. Please verify your credentials.');
+        // Store Manager Login
+        const selectedMgr = managersList.find(m => m.id === loginSelectedManagerId);
+        const resolvedName = loginSelectedManagerId === 'custom'
+          ? loginCustomManagerName.trim()
+          : (selectedMgr ? selectedMgr.name : loginCustomManagerName.trim());
+
+        if (!resolvedName) {
+          setAdminAuthError('Please select or type your manager name.');
+          setIsAdminLoggingIn(false);
+          return;
+        }
+
+        const inputPass = adminPassword;
+        if (inputPass === 'mgr@2018' || inputPass === 'lak@2018') {
+          setIsAdminAuthenticated(true);
+          setAuthRole('manager');
+          setCurrentManagerName(resolvedName);
+          try {
+            sessionStorage.setItem('convenio_admin_auth', 'true');
+            sessionStorage.setItem('convenio_auth_role', 'manager');
+            sessionStorage.setItem('convenio_manager_name', resolvedName);
+          } catch {
+            // ignore
+          }
+          setAdminPassword('');
+          setAdminAuthError('');
+        } else {
+          setAdminAuthError('Incorrect manager access password (default: mgr@2018).');
+        }
       }
       setIsAdminLoggingIn(false);
-    }, 350);
+    }, 300);
   };
 
   const handleAdminLogout = () => {
     setIsAdminAuthenticated(false);
+    setAuthRole('admin');
+    setCurrentManagerName('');
     try {
       sessionStorage.removeItem('convenio_admin_auth');
+      sessionStorage.removeItem('convenio_auth_role');
+      sessionStorage.removeItem('convenio_manager_name');
     } catch {
       // ignore
     }
@@ -644,6 +715,75 @@ export default function App() {
     setAdminPassword('');
     setAdminAuthError('');
     navigateTo('attendance');
+  };
+
+  const handleSwitchToManagerView = (managerName = 'Rajesh Kumar') => {
+    setAuthRole('manager');
+    setCurrentManagerName(managerName);
+    setAdminTab('branches');
+    try {
+      sessionStorage.setItem('convenio_auth_role', 'manager');
+      sessionStorage.setItem('convenio_manager_name', managerName);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleSwitchToSuperAdmin = () => {
+    setAuthRole('admin');
+    setCurrentManagerName('');
+    try {
+      sessionStorage.setItem('convenio_auth_role', 'admin');
+      sessionStorage.removeItem('convenio_manager_name');
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleAddManager = (e) => {
+    e.preventDefault();
+    if (!newManagerName.trim()) return;
+    const newMgr = {
+      id: 'mgr-' + Date.now(),
+      name: newManagerName.trim(),
+      role: newManagerRole.trim() || 'Store Manager',
+      email: newManagerEmail.trim() || `${newManagerName.trim().toLowerCase().replace(/\s+/g, '')}@convenio.com`
+    };
+    const updated = [...managersList, newMgr];
+    setManagersList(updated);
+    saveStoredManagers(updated);
+    setNewManagerName('');
+    setNewManagerRole('');
+    setNewManagerEmail('');
+    setShowAddManagerModal(false);
+
+    logAdminAction('manager_added', `Added new manager "${newMgr.name}" (${newMgr.role})`, {
+      managerName: newMgr.name,
+      role: newMgr.role
+    });
+    setTransferToast({
+      message: `Manager "${newMgr.name}" registered successfully.`,
+      type: 'success'
+    });
+    setTimeout(() => setTransferToast(null), 4000);
+  };
+
+  const handleRemoveManager = (mgrId) => {
+    const mgr = managersList.find(m => m.id === mgrId);
+    if (!mgr) return;
+    if (window.confirm(`Are you sure you want to remove manager "${mgr.name}"?`)) {
+      const updated = managersList.filter(m => m.id !== mgrId);
+      setManagersList(updated);
+      saveStoredManagers(updated);
+      logAdminAction('manager_removed', `Removed manager "${mgr.name}"`, {
+        managerName: mgr.name
+      });
+      setTransferToast({
+        message: `Manager "${mgr.name}" removed.`,
+        type: 'info'
+      });
+      setTimeout(() => setTransferToast(null), 4000);
+    }
   };
 
   // ================= BRANCH MANAGEMENT HANDLERS =================
@@ -753,6 +893,16 @@ export default function App() {
     const employeesToMove = (fromBranch.employees || []).filter(e => empIds.includes(e.id));
     if (employeesToMove.length === 0) return;
 
+    const performer = authRole === 'manager'
+      ? `Manager ${currentManagerName || 'Store Manager'}`
+      : 'Super Admin';
+
+    const employeesWithMeta = employeesToMove.map(emp => ({
+      ...emp,
+      lastTransferredBy: performer,
+      lastTransferredAt: new Date().toLocaleDateString([], { day: 'numeric', month: 'short' })
+    }));
+
     setBranches(prev => prev.map(b => {
       if (b.id === fromBranchId) {
         return {
@@ -763,7 +913,7 @@ export default function App() {
       if (b.id === toBranchId) {
         return {
           ...b,
-          employees: [...(b.employees || []), ...employeesToMove]
+          employees: [...(b.employees || []), ...employeesWithMeta]
         };
       }
       return b;
@@ -781,9 +931,12 @@ export default function App() {
     logAdminAction(
       'transfer',
       employeesToMove.length === 1
-        ? `Transferred staff member "${employeesToMove[0].name}" from ${fromBranch.name} to ${toBranch.name}`
-        : `Bulk transferred ${employeesToMove.length} staff members from ${fromBranch.name} to ${toBranch.name}`,
+        ? `Transferred staff member "${employeesToMove[0].name}" from ${fromBranch.name} to ${toBranch.name} by ${performer}`
+        : `Bulk transferred ${employeesToMove.length} staff members from ${fromBranch.name} to ${toBranch.name} by ${performer}`,
       {
+        transferredBy: performer,
+        role: authRole,
+        managerName: currentManagerName || 'Super Admin',
         count: employeesToMove.length,
         staffNames: employeesToMove.map(e => e.name),
         fromBranch: fromBranch.name,
@@ -792,7 +945,7 @@ export default function App() {
     );
 
     setTransferToast({
-      message: `${label} transferred to ${toBranch.name}.`,
+      message: `${label} transferred to ${toBranch.name} by ${performer}.`,
       type: 'success'
     });
     setTimeout(() => setTransferToast(null), 4500);
@@ -1777,13 +1930,43 @@ export default function App() {
           <main className="main-content">
             <div className="admin-login-card">
               <div className="admin-login-header">
-                <div className="admin-login-badge-icon">
-                  <Lock size={26} />
+                <div className={`admin-login-badge-icon ${loginRoleTab === 'manager' ? 'icon-manager-amber' : ''}`}>
+                  {loginRoleTab === 'manager' ? <Users size={26} /> : <Lock size={26} />}
                 </div>
-                <h1 className="admin-login-title">Admin Authentication</h1>
+                <h1 className="admin-login-title">
+                  {loginRoleTab === 'manager' ? 'Store Manager Portal' : 'Admin Authentication'}
+                </h1>
                 <p className="admin-login-subtitle">
-                  Restricted access. Please sign in with your HR management credentials.
+                  {loginRoleTab === 'manager' 
+                    ? 'Staff branch transfers & attendance monitoring portal' 
+                    : 'Restricted access. Please sign in with your HR management credentials.'}
                 </p>
+              </div>
+
+              {/* Role Toggle Tabs */}
+              <div className="login-role-tabs">
+                <button
+                  type="button"
+                  className={`login-role-tab ${loginRoleTab === 'admin' ? 'active' : ''}`}
+                  onClick={() => {
+                    setLoginRoleTab('admin');
+                    setAdminAuthError('');
+                  }}
+                >
+                  <ShieldCheck size={16} />
+                  <span>Super Admin</span>
+                </button>
+                <button
+                  type="button"
+                  className={`login-role-tab ${loginRoleTab === 'manager' ? 'active' : ''}`}
+                  onClick={() => {
+                    setLoginRoleTab('manager');
+                    setAdminAuthError('');
+                  }}
+                >
+                  <Users size={16} />
+                  <span>Store Manager</span>
+                </button>
               </div>
 
               {adminAuthError && (
@@ -1794,27 +1977,70 @@ export default function App() {
               )}
 
               <form className="admin-login-form" onSubmit={handleAdminLogin}>
-                <div className="admin-input-group">
-                  <label htmlFor="admin-username-input">Username / Email</label>
-                  <div className="admin-input-wrapper">
-                    <Mail size={18} className="admin-input-icon" />
-                    <input
-                      id="admin-username-input"
-                      type="email"
-                      required
-                      autoComplete="username"
-                      placeholder="hr@lordsandkings.co"
-                      value={adminUsername}
-                      onChange={(e) => {
-                        setAdminUsername(e.target.value);
-                        if (adminAuthError) setAdminAuthError('');
-                      }}
-                    />
+                {loginRoleTab === 'admin' ? (
+                  <div className="admin-input-group">
+                    <label htmlFor="admin-username-input">Admin Email</label>
+                    <div className="admin-input-wrapper">
+                      <Mail size={18} className="admin-input-icon" />
+                      <input
+                        id="admin-username-input"
+                        type="email"
+                        required
+                        autoComplete="username"
+                        placeholder="hr@lordsandkings.co"
+                        value={adminUsername}
+                        onChange={(e) => {
+                          setAdminUsername(e.target.value);
+                          if (adminAuthError) setAdminAuthError('');
+                        }}
+                      />
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="admin-input-group">
+                    <label htmlFor="login-manager-select">Manager Name</label>
+                    <div className="admin-input-wrapper">
+                      <Users size={18} className="admin-input-icon" />
+                      <select
+                        id="login-manager-select"
+                        className="manager-select-input"
+                        value={loginSelectedManagerId}
+                        onChange={(e) => {
+                          setLoginSelectedManagerId(e.target.value);
+                          if (adminAuthError) setAdminAuthError('');
+                        }}
+                      >
+                        {managersList.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name} ({m.role})
+                          </option>
+                        ))}
+                        <option value="custom">+ Enter Custom Manager Name...</option>
+                      </select>
+                    </div>
+
+                    {loginSelectedManagerId === 'custom' && (
+                      <div className="custom-manager-name-box">
+                        <input
+                          type="text"
+                          required
+                          placeholder="Type your full name"
+                          value={loginCustomManagerName}
+                          onChange={(e) => {
+                            setLoginCustomManagerName(e.target.value);
+                            if (adminAuthError) setAdminAuthError('');
+                          }}
+                          className="custom-manager-text-input"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="admin-input-group">
-                  <label htmlFor="admin-password-input">Password</label>
+                  <label htmlFor="admin-password-input">
+                    {loginRoleTab === 'manager' ? 'Manager Password' : 'Admin Password'}
+                  </label>
                   <div className="admin-input-wrapper">
                     <Lock size={18} className="admin-input-icon" />
                     <input
@@ -1822,7 +2048,7 @@ export default function App() {
                       type={showAdminPassword ? 'text' : 'password'}
                       required
                       autoComplete="current-password"
-                      placeholder="Enter admin password"
+                      placeholder={loginRoleTab === 'manager' ? 'Enter manager password' : 'Enter admin password'}
                       value={adminPassword}
                       onChange={(e) => {
                         setAdminPassword(e.target.value);
@@ -1839,23 +2065,28 @@ export default function App() {
                       {showAdminPassword ? <EyeOff size={17} /> : <Eye size={17} />}
                     </button>
                   </div>
+                  {loginRoleTab === 'manager' && (
+                    <span className="login-hint-text">
+                      Default access password: <code>mgr@2018</code>
+                    </span>
+                  )}
                 </div>
 
                 <button
                   type="submit"
                   id="admin-login-submit-btn"
-                  className="admin-login-submit-btn"
+                  className={`admin-login-submit-btn ${loginRoleTab === 'manager' ? 'btn-manager-submit' : ''}`}
                   disabled={isAdminLoggingIn}
                 >
                   {isAdminLoggingIn ? (
                     <>
                       <Loader2 size={18} className="spinner" />
-                      <span>Verifying...</span>
+                      <span>Signing in...</span>
                     </>
                   ) : (
                     <>
-                      <ShieldCheck size={18} />
-                      <span>Sign In to Admin Portal</span>
+                      {loginRoleTab === 'manager' ? <Users size={18} /> : <ShieldCheck size={18} />}
+                      <span>{loginRoleTab === 'manager' ? 'Sign In to Manager Portal' : 'Sign In as Super Admin'}</span>
                     </>
                   )}
                 </button>
@@ -1896,22 +2127,54 @@ export default function App() {
             <div className="admin-header-card">
               <div className="admin-title-row">
                 <div className="admin-title-left">
-                  <h1 className="admin-title">Admin Dashboard</h1>
+                  <h1 className="admin-title">
+                    {authRole === 'manager' ? 'Store Manager Portal' : 'Admin Dashboard'}
+                  </h1>
                   <div className="admin-auth-row">
-                    <div className="admin-auth-badge">
-                      <ShieldCheck size={13} color="#e11d24" />
-                      <span>hr@lordsandkings.co</span>
-                    </div>
-                    <button 
-                      type="button" 
-                      id="btn-purge-cache"
-                      className="btn-purge-cache" 
-                      onClick={handlePurgeCache} 
-                      title="Clear all browser cached memory and re-sync fresh from database"
-                    >
-                      <RefreshCw size={11} />
-                      <span>Clear Cache</span>
-                    </button>
+                    {authRole === 'manager' ? (
+                      <>
+                        <div className="admin-auth-badge badge-manager-identity">
+                          <Users size={13} color="#d97706" />
+                          <span>Manager: <strong>{currentManagerName || 'Store Manager'}</strong></span>
+                        </div>
+                        <span className="manager-scope-tag">Staff Transfer & Attendance View Only</span>
+                        <button
+                          type="button"
+                          className="btn-switch-admin"
+                          onClick={handleSwitchToSuperAdmin}
+                          title="Switch to Super Admin Dashboard"
+                        >
+                          <ShieldCheck size={12} />
+                          <span>Switch to Admin</span>
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <div className="admin-auth-badge">
+                          <ShieldCheck size={13} color="#e11d24" />
+                          <span>hr@lordsandkings.co</span>
+                        </div>
+                        <button 
+                          type="button" 
+                          id="btn-purge-cache"
+                          className="btn-purge-cache" 
+                          onClick={handlePurgeCache} 
+                          title="Clear all browser cached memory and re-sync fresh from database"
+                        >
+                          <RefreshCw size={11} />
+                          <span>Clear Cache</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-switch-manager-view"
+                          onClick={() => handleSwitchToManagerView(managersList[0]?.name || 'Rajesh Kumar')}
+                          title="Launch Store Manager Portal view"
+                        >
+                          <Users size={12} />
+                          <span>Manager View</span>
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -1923,8 +2186,8 @@ export default function App() {
                     onClick={() => setAdminTab('branches')}
                   >
                     <Building2 size={16} />
-                    <span className="tab-label-full">Branches & Staff</span>
-                    <span className="tab-label-short">Branches</span>
+                    <span className="tab-label-full">{authRole === 'manager' ? 'Staff Transfers' : 'Branches & Staff'}</span>
+                    <span className="tab-label-short">{authRole === 'manager' ? 'Transfers' : 'Branches'}</span>
                     <span className="tab-pill-counter">{branches.length}</span>
                   </button>
                   <button 
@@ -1937,6 +2200,18 @@ export default function App() {
                     <span className="tab-label-short">Logs</span>
                     <span className="tab-pill-counter">{records.length}</span>
                   </button>
+                  {authRole === 'admin' && (
+                    <button 
+                      id="tab-btn-managers"
+                      className={`admin-tab-btn ${adminTab === 'managers' ? 'active' : ''}`}
+                      onClick={() => setAdminTab('managers')}
+                    >
+                      <Users size={16} />
+                      <span className="tab-label-full">Store Managers</span>
+                      <span className="tab-label-short">Managers</span>
+                      <span className="tab-pill-counter">{managersList.length}</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1973,14 +2248,16 @@ export default function App() {
                       <h3>Branches ({branches.length})</h3>
                     </div>
                   </div>
-                  <button 
-                    id="btn-add-branch-open"
-                    className="btn-add-primary"
-                    onClick={() => setShowAddBranchModal(true)}
-                  >
-                    <Plus size={16} />
-                    <span>Add Branch</span>
-                  </button>
+                  {authRole === 'admin' && (
+                    <button 
+                      id="btn-add-branch-open"
+                      className="btn-add-primary"
+                      onClick={() => setShowAddBranchModal(true)}
+                    >
+                      <Plus size={16} />
+                      <span>Add Branch</span>
+                    </button>
+                  )}
                 </div>
 
                 <div className="branch-cards-list">
@@ -2012,20 +2289,24 @@ export default function App() {
                           </div>
 
                           <div className="branch-item-actions" onClick={(e) => e.stopPropagation()}>
-                            <button 
-                              className="btn-icon-edit"
-                              title="Edit Branch Name"
-                              onClick={() => setEditingBranch(b)}
-                            >
-                              <Pencil size={14} />
-                            </button>
-                            <button 
-                              className="btn-icon-delete"
-                              title="Delete Branch"
-                              onClick={() => promptDeleteBranch(b.id)}
-                            >
-                              <Trash2 size={14} />
-                            </button>
+                            {authRole === 'admin' && (
+                              <>
+                                <button 
+                                  className="btn-icon-edit"
+                                  title="Edit Branch Name"
+                                  onClick={() => setEditingBranch(b)}
+                                >
+                                  <Pencil size={14} />
+                                </button>
+                                <button 
+                                  className="btn-icon-delete"
+                                  title="Delete Branch"
+                                  onClick={() => promptDeleteBranch(b.id)}
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </div>
                       );
@@ -2050,36 +2331,49 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Clean Add Employee Form */}
-                    <form className="add-emp-form-card" onSubmit={handleAddEmployee}>
-                      <div className="add-emp-inputs-row">
-                        <div className="input-group-grow">
-                          <input 
-                            id="new-emp-name-input"
-                            type="text" 
-                            required 
-                            placeholder="Add employee name (e.g. Ramesh Kumar)" 
-                            value={newEmpName}
-                            onChange={(e) => setNewEmpName(e.target.value)}
-                          />
+                    {/* Manager Mode Guidance Banner */}
+                    {authRole === 'manager' && (
+                      <div className="manager-transfer-banner">
+                        <Users size={16} />
+                        <div>
+                          <strong>Store Manager Transfer Mode:</strong>
+                          <span> Select staff using checkboxes to bulk transfer or click the transfer icon <ArrowRightLeft size={12} style={{display:'inline', verticalAlign:'middle'}} /> to move staff to another branch.</span>
                         </div>
-                        <button 
-                          id="btn-add-emp-submit"
-                          type="submit" 
-                          className="btn-add-emp"
-                        >
-                          <Plus size={16} />
-                          <span>Add Staff</span>
-                        </button>
                       </div>
-                    </form>
+                    )}
+
+                    {/* Clean Add Employee Form (Super Admin Only) */}
+                    {authRole === 'admin' && (
+                      <form className="add-emp-form-card" onSubmit={handleAddEmployee}>
+                        <div className="add-emp-inputs-row">
+                          <div className="input-group-grow">
+                            <input 
+                              id="new-emp-name-input"
+                              type="text" 
+                              required 
+                              placeholder="Add employee name (e.g. Ramesh Kumar)" 
+                              value={newEmpName}
+                              onChange={(e) => setNewEmpName(e.target.value)}
+                            />
+                          </div>
+                          <button 
+                            id="btn-add-emp-submit"
+                            type="submit" 
+                            className="btn-add-emp"
+                          >
+                            <Plus size={16} />
+                            <span>Add Staff</span>
+                          </button>
+                        </div>
+                      </form>
+                    )}
 
                     {/* Employee Roster Search */}
                     {currentAdminBranch.employees?.length > 3 && (
                       <div className="emp-search-row">
                         <Search size={15} color="#94a3b8" />
                         <input 
-                          type="text"
+                          type="text" 
                           placeholder="Filter employees in this branch..."
                           value={adminEmpSearch}
                           onChange={(e) => setAdminEmpSearch(e.target.value)}
@@ -2127,12 +2421,23 @@ export default function App() {
                                     {emp.name.charAt(0).toUpperCase()}
                                   </div>
                                   <div className="emp-item-info">
-                                    <strong className="emp-item-name">{emp.name}</strong>
+                                    <div className="emp-name-row">
+                                      <strong className="emp-item-name">{emp.name}</strong>
+                                      {emp.lastTransferredBy && (
+                                        <span 
+                                          className="emp-transferred-tag" 
+                                          title={`Transferred by ${emp.lastTransferredBy}${emp.lastTransferredAt ? ' on ' + new Date(emp.lastTransferredAt).toLocaleDateString() : ''}`}
+                                        >
+                                          Moved by {emp.lastTransferredBy}
+                                        </span>
+                                      )}
+                                    </div>
                                     {emp.role && <span className="emp-item-role">{emp.role}</span>}
                                   </div>
                                 </div>
 
                                 <div className="emp-item-actions">
+                                  {/* Transfer is available to both Managers and Admin */}
                                   <button 
                                     type="button"
                                     className="btn-icon-transfer"
@@ -2145,28 +2450,34 @@ export default function App() {
                                   >
                                     <ArrowRightLeft size={14} />
                                   </button>
-                                  <button 
-                                    type="button"
-                                    className="btn-icon-edit"
-                                    title="Edit Employee & Branch"
-                                    onClick={() => setEditingEmp({
-                                      branchId: currentAdminBranch.id,
-                                      empId: emp.id,
-                                      name: emp.name,
-                                      role: emp.role || '',
-                                      targetBranchId: currentAdminBranch.id
-                                    })}
-                                  >
-                                    <Pencil size={14} />
-                                  </button>
-                                  <button 
-                                    type="button"
-                                    className="btn-icon-delete"
-                                    title="Remove Employee"
-                                    onClick={() => promptDeleteEmployee(currentAdminBranch.id, emp)}
-                                  >
-                                    <Trash2 size={14} />
-                                  </button>
+
+                                  {/* Edit and Delete are Super Admin Only */}
+                                  {authRole === 'admin' && (
+                                    <>
+                                      <button 
+                                        type="button"
+                                        className="btn-icon-edit"
+                                        title="Edit Employee & Branch"
+                                        onClick={() => setEditingEmp({
+                                          branchId: currentAdminBranch.id,
+                                          empId: emp.id,
+                                          name: emp.name,
+                                          role: emp.role || '',
+                                          targetBranchId: currentAdminBranch.id
+                                        })}
+                                      >
+                                        <Pencil size={14} />
+                                      </button>
+                                      <button 
+                                        type="button"
+                                        className="btn-icon-delete"
+                                        title="Remove Employee"
+                                        onClick={() => promptDeleteEmployee(currentAdminBranch.id, emp)}
+                                      >
+                                        <Trash2 size={14} />
+                                      </button>
+                                    </>
+                                  )}
                                 </div>
                               </div>
                             );
@@ -2312,7 +2623,7 @@ export default function App() {
                       <FileSpreadsheet size={16} />
                       <span>Export CSV</span>
                     </button>
-                    {records.length > 0 && (
+                    {authRole === 'admin' && records.length > 0 && (
                       <button 
                         id="clear-records-btn" 
                         className="btn-danger-clear" 
@@ -2566,6 +2877,167 @@ export default function App() {
                   )}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* TAB 3: STORE MANAGERS DIRECTORY (SUPER ADMIN ONLY) */}
+          {adminTab === 'managers' && authRole === 'admin' && (
+            <div className="managers-portal-view">
+              {/* Directory Header Bar */}
+              <div className="managers-header-card">
+                <div className="managers-header-info">
+                  <div className="mgr-header-icon-box">
+                    <Users size={22} className="card-icon-navy" />
+                  </div>
+                  <div>
+                    <div className="mgr-title-row">
+                      <h3>Store Managers Directory</h3>
+                      <span className="mgr-count-pill">{managersList.length} Active Managers</span>
+                    </div>
+                    <p className="mgr-subtitle">
+                      Store managers have restricted access to transfer employees between branches and review attendance records. Every transfer explicitly records and badges the manager's name for complete traceability.
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  type="button" 
+                  id="btn-add-manager-open"
+                  className="btn-add-primary"
+                  onClick={() => setShowAddManagerModal(true)}
+                >
+                  <Plus size={16} />
+                  <span>Add New Manager</span>
+                </button>
+              </div>
+
+              {/* Security & Permissions Policy Strip */}
+              <div className="managers-policy-strip">
+                <div className="policy-pill policy-allowed">
+                  <ShieldCheck size={14} />
+                  <span>Allowed: Inter-Branch Employee Transfers (Single & Bulk)</span>
+                </div>
+                <div className="policy-pill policy-allowed">
+                  <Eye size={14} />
+                  <span>Allowed: View & Filter Attendance Records</span>
+                </div>
+                <div className="policy-pill policy-restricted">
+                  <Lock size={14} />
+                  <span>Restricted: No Branch Creation/Deletion, No Record Purging</span>
+                </div>
+              </div>
+
+              {/* Managers Grid */}
+              <div className="managers-grid-container">
+                {managersList.map((mgr) => (
+                  <div key={mgr.id} className="manager-directory-card">
+                    <div className="mgr-card-top">
+                      <div className="mgr-avatar-circle">
+                        {mgr.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                      </div>
+                      <div className="mgr-card-meta">
+                        <div className="mgr-name-row">
+                          <strong className="mgr-name">{mgr.name}</strong>
+                          <span className="mgr-role-badge">{mgr.role || 'Store Manager'}</span>
+                        </div>
+                        <span className="mgr-email-label">{mgr.email || 'manager@convenio.in'}</span>
+                      </div>
+                    </div>
+
+                    <div className="mgr-card-capabilities">
+                      <div className="mgr-cap-item">
+                        <Check size={13} className="text-emerald" />
+                        <span>Authorized for Staff Transfers</span>
+                      </div>
+                      <div className="mgr-cap-item">
+                        <Check size={13} className="text-emerald" />
+                        <span>Authorized for Attendance Logs</span>
+                      </div>
+                    </div>
+
+                    <div className="mgr-card-actions">
+                      <button 
+                        type="button"
+                        className="btn-mgr-test-login"
+                        onClick={() => handleSwitchToManagerView(mgr.name)}
+                        title={`Open portal with ${mgr.name}'s permissions`}
+                      >
+                        <Users size={14} />
+                        <span>Open as {mgr.name.split(' ')[0]}</span>
+                      </button>
+                      <button 
+                        type="button"
+                        className="btn-mgr-delete"
+                        onClick={() => handleRemoveManager(mgr.id)}
+                        title="Remove manager"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Recent Staff Transfers Audit Trail */}
+              <div className="transfers-audit-section">
+                <div className="transfers-audit-header">
+                  <div className="audit-header-left">
+                    <ArrowRightLeft size={18} className="card-icon-navy" />
+                    <div>
+                      <h4>Inter-Branch Transfers Log</h4>
+                      <p className="sub-text">History of employees moved between branches, tracking who initiated each transfer.</p>
+                    </div>
+                  </div>
+                </div>
+
+                {adminLogs.filter(l => l.category === 'transfer').length === 0 ? (
+                  <div className="empty-sub-state">
+                    <ArrowRightLeft size={32} color="#cbd5e1" />
+                    <p>No employee transfers recorded yet.</p>
+                    <span className="sub-helper">When managers transfer staff from the roster, real-time records with manager names will display here.</span>
+                  </div>
+                ) : (
+                  <div className="transfers-audit-list">
+                    {adminLogs.filter(l => l.category === 'transfer').slice(0, 15).map(log => (
+                      <div key={log.id} className="transfer-audit-card">
+                        <div className="transfer-audit-left">
+                          <div className="transfer-audit-icon">
+                            <ArrowRightLeft size={16} />
+                          </div>
+                          <div className="transfer-audit-body">
+                            <div className="transfer-audit-title-line">
+                              <span className="transfer-audit-title">{log.title}</span>
+                            </div>
+                            <div className="transfer-audit-chips">
+                              {log.details?.transferredBy && (
+                                <span className="chip-performer">
+                                  <Users size={12} />
+                                  <span>By: <strong>{log.details.transferredBy}</strong></span>
+                                </span>
+                              )}
+                              {log.details?.fromBranch && log.details?.toBranch && (
+                                <span className="chip-route">
+                                  <span>{log.details.fromBranch}</span>
+                                  <ArrowRightLeft size={11} />
+                                  <span>{log.details.toBranch}</span>
+                                </span>
+                              )}
+                              {log.details?.count && (
+                                <span className="chip-count">
+                                  {log.details.count} staff moved
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="transfer-audit-right">
+                          <span className="transfer-audit-time">{log.timeStr}</span>
+                          <span className="transfer-audit-date">{log.dateStr}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </main>
@@ -3957,6 +4429,91 @@ export default function App() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL: ADD STORE MANAGER ================= */}
+      {showAddManagerModal && (
+        <div className="modal-overlay" onClick={() => setShowAddManagerModal(false)}>
+          <div className="modal-content add-manager-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header-row">
+              <div className="modal-title-with-icon">
+                <Users size={20} className="modal-icon-brand" />
+                <div>
+                  <h3>Add Store Manager</h3>
+                  <p className="modal-desc-compact">Authorize a manager to handle staff transfers & attendance</p>
+                </div>
+              </div>
+              <button className="icon-close-btn" onClick={() => setShowAddManagerModal(false)}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddManager} className="add-manager-form">
+              <div className="form-group-clean">
+                <label htmlFor="new-mgr-name">Manager Full Name *</label>
+                <input
+                  id="new-mgr-name"
+                  type="text"
+                  required
+                  placeholder="e.g. Karthik Raja"
+                  value={newManagerName}
+                  onChange={(e) => setNewManagerName(e.target.value)}
+                  autoFocus
+                />
+              </div>
+
+              <div className="form-group-clean">
+                <label htmlFor="new-mgr-role">Role / Area Scope *</label>
+                <input
+                  id="new-mgr-role"
+                  type="text"
+                  required
+                  placeholder="e.g. Area Operations Manager - OMR Cluster"
+                  value={newManagerRole}
+                  onChange={(e) => setNewManagerRole(e.target.value)}
+                />
+              </div>
+
+              <div className="form-group-clean">
+                <label htmlFor="new-mgr-email">Email Address (Optional)</label>
+                <input
+                  id="new-mgr-email"
+                  type="email"
+                  placeholder="e.g. karthik@convenio.in"
+                  value={newManagerEmail}
+                  onChange={(e) => setNewManagerEmail(e.target.value)}
+                />
+              </div>
+
+              <div className="manager-permission-preview">
+                <strong>Granted Permissions:</strong>
+                <ul>
+                  <li><Check size={13} color="#10b981" /> Can transfer employees between any Convenio Mart branches</li>
+                  <li><Check size={13} color="#10b981" /> Can view all employee attendance records, filter by date, and export CSV</li>
+                  <li><Lock size={13} color="#ef4444" /> Restricted: Cannot delete records, edit branches, or delete staff</li>
+                </ul>
+              </div>
+
+              <div className="modal-actions-clean">
+                <button 
+                  type="button" 
+                  className="btn-cancel-clean" 
+                  onClick={() => setShowAddManagerModal(false)}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  id="btn-add-mgr-submit"
+                  className="btn-submit-clean"
+                >
+                  <Plus size={16} />
+                  <span>Authorize & Add Manager</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

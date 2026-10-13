@@ -6271,3 +6271,751 @@ body {
     width: 100%;
   }
 }
+
+/* ==========================================================================
+   STORE MANAGERS PORTAL & TRANSFER ATTRIBUTION STYLES
+   ========================================================================== */
+
+/* Login Role Tabs Switcher */
+.login-role-tabs {
+  display: flex;
+  background: #f1f5f9;
+  padding: 0.3rem;
+  border-radius: 12px;
+  gap: 0.35rem;
+  margin-bottom: 1.25rem;
+  border: 1px solid #e2e8f0;
+}
+
+.btn-role-tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.6rem 0.85rem;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-role-tab:hover {
+  color: #0f172a;
+}
+
+.btn-role-tab.active {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.login-custom-input {
+  margin-top: 0.5rem;
+  width: 100%;
+  padding: 0.65rem 0.85rem;
+  border-radius: 9px;
+  border: 1.5px solid #cbd5e1;
+  font-family: inherit;
+  font-size: 0.85rem;
+  background: #f8fafc;
+  color: #0f172a;
+  outline: none;
+  transition: all 0.15s ease;
+}
+
+.login-custom-input:focus {
+  border-color: #d97706;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.12);
+}
+
+.login-hint-text {
+  display: block;
+  font-size: 0.75rem;
+  color: #64748b;
+  margin-top: 0.35rem;
+}
+
+.login-hint-text code {
+  background: #f1f5f9;
+  padding: 0.12rem 0.35rem;
+  border-radius: 4px;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.btn-manager-submit {
+  background: linear-gradient(135deg, #d97706 0%, #b45309 100%) !important;
+}
+
+.btn-manager-submit:hover {
+  background: linear-gradient(135deg, #b45309 0%, #92400e 100%) !important;
+  box-shadow: 0 4px 12px rgba(217, 119, 6, 0.28) !important;
+}
+
+/* Header Manager Identity Badge & Switchers */
+.badge-manager-identity {
+  background: #fef3c7 !important;
+  color: #92400e !important;
+  border-color: #fde68a !important;
+}
+
+.manager-scope-tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.73rem;
+  font-weight: 600;
+  color: #475569;
+  background: #f1f5f9;
+  padding: 0.22rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+}
+
+.btn-switch-admin {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: #ffffff;
+  border: 1.5px solid #cbd5e1;
+  color: #0f172a;
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding: 0.28rem 0.65rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-switch-admin:hover {
+  border-color: #e11d24;
+  color: #e11d24;
+  background: #fef2f2;
+}
+
+.btn-switch-manager-view {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: #ffffff;
+  border: 1.5px solid #fde68a;
+  color: #92400e;
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding: 0.28rem 0.65rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-switch-manager-view:hover {
+  background: #fef3c7;
+  border-color: #d97706;
+}
+
+/* Manager Transfer Guidance Banner */
+.manager-transfer-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.75rem 0.95rem;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  margin-bottom: 0.85rem;
+  color: #1e40af;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.manager-transfer-banner svg {
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+  color: #2563eb;
+}
+
+/* Employee Attribution Badge */
+.emp-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.emp-transferred-tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.69rem;
+  font-weight: 600;
+  color: #0369a1;
+  background: #e0f2fe;
+  border: 1px solid #bae6fd;
+  padding: 0.12rem 0.45rem;
+  border-radius: 6px;
+  letter-spacing: 0.01em;
+}
+
+/* ==========================================================================
+   MANAGERS DIRECTORY PORTAL VIEW
+   ========================================================================== */
+
+.managers-portal-view {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.managers-header-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.managers-header-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.mgr-header-icon-box {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #0f172a;
+}
+
+.mgr-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+
+.mgr-title-row h3 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.mgr-count-pill {
+  font-size: 0.74rem;
+  font-weight: 600;
+  background: #f1f5f9;
+  color: #475569;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+}
+
+.mgr-subtitle {
+  margin: 0;
+  font-size: 0.84rem;
+  color: #64748b;
+  line-height: 1.45;
+  max-width: 750px;
+}
+
+/* Policy Strip */
+.managers-policy-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.policy-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.policy-allowed {
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+.policy-restricted {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+/* Managers Cards Grid */
+.managers-grid-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1.15rem;
+}
+
+.manager-directory-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.95rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  transition: all 0.2s ease;
+}
+
+.manager-directory-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+  transform: translateY(-2px);
+}
+
+.mgr-card-top {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.mgr-avatar-circle {
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1rem;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(217, 119, 6, 0.25);
+}
+
+.mgr-card-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.mgr-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.15rem;
+}
+
+.mgr-name {
+  font-size: 0.96rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.mgr-role-badge {
+  font-size: 0.68rem;
+  font-weight: 600;
+  background: #fef3c7;
+  color: #92400e;
+  padding: 0.12rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid #fde68a;
+}
+
+.mgr-email-label {
+  display: block;
+  font-size: 0.77rem;
+  color: #64748b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mgr-card-capabilities {
+  background: #f8fafc;
+  border: 1px solid #f1f5f9;
+  border-radius: 10px;
+  padding: 0.65rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.mgr-cap-item {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.76rem;
+  color: #334155;
+  font-weight: 500;
+}
+
+.text-emerald {
+  color: #059669;
+}
+
+.mgr-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: auto;
+}
+
+.btn-mgr-test-login {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.55rem 0.85rem;
+  border-radius: 9px;
+  border: 1.5px solid #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+  font-family: inherit;
+  font-size: 0.81rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-mgr-test-login:hover {
+  background: #fef3c7;
+  border-color: #d97706;
+  transform: translateY(-1px);
+}
+
+.btn-mgr-delete {
+  padding: 0.55rem;
+  border-radius: 9px;
+  border: 1px solid #fee2e2;
+  background: #fff5f5;
+  color: #dc2626;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-mgr-delete:hover {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #b91c1c;
+}
+
+/* Inter-Branch Transfers Log Trail */
+.transfers-audit-section {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 1.25rem 1.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.transfers-audit-header {
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.audit-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.audit-header-left h4 {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.transfers-audit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.transfer-audit-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 11px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  transition: all 0.15s ease;
+}
+
+.transfer-audit-card:hover {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+}
+
+.transfer-audit-left {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.transfer-audit-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: #e0f2fe;
+  color: #0284c7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.transfer-audit-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.transfer-audit-title-line {
+  margin-bottom: 0.25rem;
+}
+
+.transfer-audit-title {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.transfer-audit-chips {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.chip-performer {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.73rem;
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+  padding: 0.12rem 0.45rem;
+  border-radius: 6px;
+}
+
+.chip-route {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.73rem;
+  background: #f1f5f9;
+  color: #475569;
+  padding: 0.12rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+
+.chip-count {
+  font-size: 0.71rem;
+  font-weight: 600;
+  background: #e0e7ff;
+  color: #4338ca;
+  padding: 0.12rem 0.42rem;
+  border-radius: 6px;
+}
+
+.transfer-audit-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+
+.transfer-audit-time {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.transfer-audit-date {
+  font-size: 0.71rem;
+  color: #94a3b8;
+}
+
+/* ==========================================================================
+   ADD STORE MANAGER MODAL
+   ========================================================================== */
+
+.add-manager-modal {
+  max-width: 480px;
+  width: 92%;
+}
+
+.modal-desc-compact {
+  margin: 0.15rem 0 0 0;
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+.add-manager-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.form-group-clean {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.form-group-clean label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.form-group-clean input {
+  width: 100%;
+  padding: 0.65rem 0.85rem;
+  border-radius: 9px;
+  border: 1.5px solid #cbd5e1;
+  font-family: inherit;
+  font-size: 0.88rem;
+  background: #ffffff;
+  color: #0f172a;
+  outline: none;
+  transition: all 0.15s ease;
+}
+
+.form-group-clean input:focus {
+  border-color: #d97706;
+  box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.12);
+}
+
+.manager-permission-preview {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.75rem 0.95rem;
+  font-size: 0.78rem;
+  color: #334155;
+}
+
+.manager-permission-preview strong {
+  display: block;
+  margin-bottom: 0.4rem;
+  color: #0f172a;
+}
+
+.manager-permission-preview ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.manager-permission-preview li {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.modal-actions-clean {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  margin-top: 0.5rem;
+}
+
+.btn-cancel-clean {
+  padding: 0.6rem 1.1rem;
+  border-radius: 9px;
+  border: 1.5px solid #cbd5e1;
+  background: #ffffff;
+  color: #475569;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-cancel-clean:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.btn-submit-clean {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.6rem 1.25rem;
+  border-radius: 9px;
+  border: none;
+  background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(217, 119, 6, 0.25);
+  transition: all 0.15s ease;
+}
+
+.btn-submit-clean:hover {
+  background: linear-gradient(135deg, #b45309 0%, #92400e 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(217, 119, 6, 0.32);
+}
+
+@media (max-width: 768px) {
+  .managers-header-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .managers-header-info {
+    flex-direction: column;
+  }
+  .managers-grid-container {
+    grid-template-columns: 1fr;
+  }
+  .transfer-audit-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .transfer-audit-right {
+    align-items: flex-start;
+    flex-direction: row;
+    gap: 0.5rem;
+  }
+}
+
