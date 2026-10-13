@@ -6648,27 +6648,58 @@ body {
   white-space: nowrap;
 }
 
-.mgr-card-capabilities {
+.mgr-creds-strip {
   background: #f8fafc;
-  border: 1px solid #f1f5f9;
+  border: 1px solid #e2e8f0;
   border-radius: 10px;
   padding: 0.65rem 0.85rem;
   display: flex;
   flex-direction: column;
+  gap: 0.45rem;
+}
+
+.mgr-cred-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+}
+
+.mgr-cred-key {
+  color: #64748b;
+  font-weight: 600;
+}
+
+.mgr-cred-val {
+  background: #ffffff;
+  padding: 0.15rem 0.45rem;
+  border-radius: 5px;
+  border: 1px solid #e2e8f0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.mgr-pass-inline {
+  display: inline-flex;
+  align-items: center;
   gap: 0.35rem;
 }
 
-.mgr-cap-item {
+.btn-toggle-mgr-pass {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 0.15rem;
   display: flex;
   align-items: center;
-  gap: 0.45rem;
-  font-size: 0.76rem;
-  color: #334155;
-  font-weight: 500;
+  transition: color 0.15s ease;
 }
 
-.text-emerald {
-  color: #059669;
+.btn-toggle-mgr-pass:hover {
+  color: #0f172a;
 }
 
 .mgr-card-actions {
@@ -6678,7 +6709,7 @@ body {
   margin-top: auto;
 }
 
-.btn-mgr-test-login {
+.btn-mgr-copy-creds {
   flex: 1;
   display: inline-flex;
   align-items: center;
@@ -6686,9 +6717,9 @@ body {
   gap: 0.45rem;
   padding: 0.55rem 0.85rem;
   border-radius: 9px;
-  border: 1.5px solid #fde68a;
-  background: #fffbeb;
-  color: #92400e;
+  border: 1.5px solid #e2e8f0;
+  background: #f8fafc;
+  color: #1e293b;
   font-family: inherit;
   font-size: 0.81rem;
   font-weight: 600;
@@ -6696,10 +6727,22 @@ body {
   transition: all 0.15s ease;
 }
 
-.btn-mgr-test-login:hover {
-  background: #fef3c7;
-  border-color: #d97706;
-  transform: translateY(-1px);
+.btn-mgr-copy-creds:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+.form-row-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+@media (max-width: 480px) {
+  .form-row-two-col {
+    grid-template-columns: 1fr;
+  }
 }
 
 .btn-mgr-delete {

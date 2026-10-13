@@ -145,9 +145,9 @@ export const STORAGE_KEY_ADMIN_LOGS = 'convenio_admin_audit_logs';
 export const STORAGE_KEY_MANAGERS = 'convenio_managers_list';
 
 export const DEFAULT_MANAGERS = [
-  { id: 'mgr-1', name: 'Rajesh Kumar', email: 'rajesh@convenio.com', role: 'Area Operations Manager' },
-  { id: 'mgr-2', name: 'Suresh Raina', email: 'suresh@convenio.com', role: 'Cluster Store Manager' },
-  { id: 'mgr-3', name: 'Praveen Nathan', email: 'praveen@convenio.com', role: 'Zonal Retail Manager' }
+  { id: 'mgr-1', name: 'Rajesh Kumar', username: 'rajesh', password: 'mgr@rajesh', email: 'rajesh@convenio.com', role: 'Area Operations Manager' },
+  { id: 'mgr-2', name: 'Suresh Raina', username: 'suresh', password: 'mgr@suresh', email: 'suresh@convenio.com', role: 'Cluster Store Manager' },
+  { id: 'mgr-3', name: 'Praveen Nathan', username: 'praveen', password: 'mgr@praveen', email: 'praveen@convenio.com', role: 'Zonal Retail Manager' }
 ];
 
 export function getStoredManagers() {
@@ -158,7 +158,15 @@ export function getStoredManagers() {
       return DEFAULT_MANAGERS;
     }
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      // Ensure all existing managers have a username and password
+      const migrated = parsed.map((m, idx) => ({
+        ...m,
+        username: m.username || (m.name ? m.name.toLowerCase().replace(/\s+/g, '') : `mgr${idx + 1}`),
+        password: m.password || 'mgr@2018'
+      }));
+      return migrated;
+    }
     return DEFAULT_MANAGERS;
   } catch (e) {
     console.error('Error loading managers:', e);

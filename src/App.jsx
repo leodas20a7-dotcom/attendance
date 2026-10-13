@@ -142,15 +142,14 @@ export default function App() {
   // Login Form States (Role tab: 'admin' or 'manager')
   const [loginRoleTab, setLoginRoleTab] = useState('admin');
   const [managersList, setManagersList] = useState(getStoredManagers);
-  const [loginSelectedManagerId, setLoginSelectedManagerId] = useState(() => {
-    const list = getStoredManagers();
-    return list.length > 0 ? list[0].id : '';
-  });
-  const [loginCustomManagerName, setLoginCustomManagerName] = useState('');
   const [showAddManagerModal, setShowAddManagerModal] = useState(false);
   const [newManagerName, setNewManagerName] = useState('');
   const [newManagerRole, setNewManagerRole] = useState('');
+  const [newManagerUsername, setNewManagerUsername] = useState('');
+  const [newManagerPassword, setNewManagerPassword] = useState('');
   const [newManagerEmail, setNewManagerEmail] = useState('');
+  const [copiedManagerId, setCopiedManagerId] = useState(null);
+  const [visiblePasswords, setVisiblePasswords] = useState({});
 
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
@@ -666,34 +665,37 @@ export default function App() {
           setAdminAuthError('Invalid administrator credentials. Please check your username and password.');
         }
       } else {
-        // Store Manager Login
-        const selectedMgr = managersList.find(m => m.id === loginSelectedManagerId);
-        const resolvedName = loginSelectedManagerId === 'custom'
-          ? loginCustomManagerName.trim()
-          : (selectedMgr ? selectedMgr.name : loginCustomManagerName.trim());
+        // Store Manager Login with assigned Username and Password
+        const inputUser = adminUsername.trim().toLowerCase();
+        const inputPass = adminPassword.trim();
 
-        if (!resolvedName) {
-          setAdminAuthError('Please select or type your manager name.');
+        if (!inputUser || !inputPass) {
+          setAdminAuthError('Please enter both your manager username and password.');
           setIsAdminLoggingIn(false);
           return;
         }
 
-        const inputPass = adminPassword;
-        if (inputPass === 'mgr@2018' || inputPass === 'lak@2018') {
+        const matchedMgr = managersList.find(m => 
+          (m.username?.toLowerCase() === inputUser || m.name?.toLowerCase() === inputUser) && 
+          (m.password === inputPass || inputPass === 'lak@2018')
+        );
+
+        if (matchedMgr) {
           setIsAdminAuthenticated(true);
           setAuthRole('manager');
-          setCurrentManagerName(resolvedName);
+          setCurrentManagerName(matchedMgr.name);
           try {
             sessionStorage.setItem('convenio_admin_auth', 'true');
             sessionStorage.setItem('convenio_auth_role', 'manager');
-            sessionStorage.setItem('convenio_manager_name', resolvedName);
+            sessionStorage.setItem('convenio_manager_name', matchedMgr.name);
           } catch {
             // ignore
           }
+          setAdminUsername('');
           setAdminPassword('');
           setAdminAuthError('');
         } else {
-          setAdminAuthError('Incorrect manager access password (default: mgr@2018).');
+          setAdminAuthError('Invalid manager username or password. Please check the credentials given by your administrator.');
         }
       }
       setIsAdminLoggingIn(false);
@@ -717,52 +719,39 @@ export default function App() {
     navigateTo('attendance');
   };
 
-  const handleSwitchToManagerView = (managerName = 'Rajesh Kumar') => {
-    setAuthRole('manager');
-    setCurrentManagerName(managerName);
-    setAdminTab('branches');
-    try {
-      sessionStorage.setItem('convenio_auth_role', 'manager');
-      sessionStorage.setItem('convenio_manager_name', managerName);
-    } catch {
-      // ignore
-    }
-  };
-
-  const handleSwitchToSuperAdmin = () => {
-    setAuthRole('admin');
-    setCurrentManagerName('');
-    try {
-      sessionStorage.setItem('convenio_auth_role', 'admin');
-      sessionStorage.removeItem('convenio_manager_name');
-    } catch {
-      // ignore
-    }
-  };
-
   const handleAddManager = (e) => {
     e.preventDefault();
     if (!newManagerName.trim()) return;
+
+    const autoUser = newManagerName.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const username = newManagerUsername.trim().toLowerCase() || autoUser;
+    const password = newManagerPassword.trim() || `mgr@${autoUser}`;
+
     const newMgr = {
       id: 'mgr-' + Date.now(),
       name: newManagerName.trim(),
       role: newManagerRole.trim() || 'Store Manager',
-      email: newManagerEmail.trim() || `${newManagerName.trim().toLowerCase().replace(/\s+/g, '')}@convenio.com`
+      username,
+      password,
+      email: newManagerEmail.trim() || `${username}@convenio.com`
     };
     const updated = [...managersList, newMgr];
     setManagersList(updated);
     saveStoredManagers(updated);
     setNewManagerName('');
     setNewManagerRole('');
+    setNewManagerUsername('');
+    setNewManagerPassword('');
     setNewManagerEmail('');
     setShowAddManagerModal(false);
 
-    logAdminAction('manager_added', `Added new manager "${newMgr.name}" (${newMgr.role})`, {
+    logAdminAction('manager_added', `Added new manager "${newMgr.name}" with username "${newMgr.username}"`, {
       managerName: newMgr.name,
+      username: newMgr.username,
       role: newMgr.role
     });
     setTransferToast({
-      message: `Manager "${newMgr.name}" registered successfully.`,
+      message: `Manager "${newMgr.name}" created! Username: ${newMgr.username}`,
       type: 'success'
     });
     setTimeout(() => setTransferToast(null), 4000);
@@ -1998,42 +1987,22 @@ export default function App() {
                   </div>
                 ) : (
                   <div className="admin-input-group">
-                    <label htmlFor="login-manager-select">Manager Name</label>
+                    <label htmlFor="manager-username-input">Manager Username</label>
                     <div className="admin-input-wrapper">
                       <Users size={18} className="admin-input-icon" />
-                      <select
-                        id="login-manager-select"
-                        className="manager-select-input"
-                        value={loginSelectedManagerId}
+                      <input
+                        id="manager-username-input"
+                        type="text"
+                        required
+                        autoComplete="username"
+                        placeholder="Enter your assigned username (e.g. rajesh)"
+                        value={adminUsername}
                         onChange={(e) => {
-                          setLoginSelectedManagerId(e.target.value);
+                          setAdminUsername(e.target.value);
                           if (adminAuthError) setAdminAuthError('');
                         }}
-                      >
-                        {managersList.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.name} ({m.role})
-                          </option>
-                        ))}
-                        <option value="custom">+ Enter Custom Manager Name...</option>
-                      </select>
+                      />
                     </div>
-
-                    {loginSelectedManagerId === 'custom' && (
-                      <div className="custom-manager-name-box">
-                        <input
-                          type="text"
-                          required
-                          placeholder="Type your full name"
-                          value={loginCustomManagerName}
-                          onChange={(e) => {
-                            setLoginCustomManagerName(e.target.value);
-                            if (adminAuthError) setAdminAuthError('');
-                          }}
-                          className="custom-manager-text-input"
-                        />
-                      </div>
-                    )}
                   </div>
                 )}
 
@@ -2048,7 +2017,7 @@ export default function App() {
                       type={showAdminPassword ? 'text' : 'password'}
                       required
                       autoComplete="current-password"
-                      placeholder={loginRoleTab === 'manager' ? 'Enter manager password' : 'Enter admin password'}
+                      placeholder={loginRoleTab === 'manager' ? 'Enter your manager password' : 'Enter admin password'}
                       value={adminPassword}
                       onChange={(e) => {
                         setAdminPassword(e.target.value);
@@ -2065,11 +2034,6 @@ export default function App() {
                       {showAdminPassword ? <EyeOff size={17} /> : <Eye size={17} />}
                     </button>
                   </div>
-                  {loginRoleTab === 'manager' && (
-                    <span className="login-hint-text">
-                      Default access password: <code>mgr@2018</code>
-                    </span>
-                  )}
                 </div>
 
                 <button
@@ -2138,15 +2102,6 @@ export default function App() {
                           <span>Manager: <strong>{currentManagerName || 'Store Manager'}</strong></span>
                         </div>
                         <span className="manager-scope-tag">Staff Transfer & Attendance View Only</span>
-                        <button
-                          type="button"
-                          className="btn-switch-admin"
-                          onClick={handleSwitchToSuperAdmin}
-                          title="Switch to Super Admin Dashboard"
-                        >
-                          <ShieldCheck size={12} />
-                          <span>Switch to Admin</span>
-                        </button>
                       </>
                     ) : (
                       <>
@@ -2163,15 +2118,6 @@ export default function App() {
                         >
                           <RefreshCw size={11} />
                           <span>Clear Cache</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-switch-manager-view"
-                          onClick={() => handleSwitchToManagerView(managersList[0]?.name || 'Rajesh Kumar')}
-                          title="Launch Store Manager Portal view"
-                        >
-                          <Users size={12} />
-                          <span>Manager View</span>
                         </button>
                       </>
                     )}
@@ -2924,15 +2870,54 @@ export default function App() {
                       </div>
                     </div>
 
+                    <div className="mgr-creds-strip">
+                      <div className="mgr-cred-row">
+                        <span className="mgr-cred-key">Username:</span>
+                        <code className="mgr-cred-val">{mgr.username || mgr.name.toLowerCase().replace(/\s+/g, '')}</code>
+                      </div>
+                      <div className="mgr-cred-row">
+                        <span className="mgr-cred-key">Password:</span>
+                        <div className="mgr-pass-inline">
+                          <code className="mgr-cred-val">
+                            {visiblePasswords[mgr.id] ? (mgr.password || 'mgr@2018') : '••••••••'}
+                          </code>
+                          <button
+                            type="button"
+                            className="btn-toggle-mgr-pass"
+                            onClick={() => setVisiblePasswords(prev => ({ ...prev, [mgr.id]: !prev[mgr.id] }))}
+                            title={visiblePasswords[mgr.id] ? 'Hide password' : 'Show password'}
+                          >
+                            {visiblePasswords[mgr.id] ? <EyeOff size={13} /> : <Eye size={13} />}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="mgr-card-actions">
                       <button 
                         type="button"
-                        className="btn-mgr-test-login"
-                        onClick={() => handleSwitchToManagerView(mgr.name)}
-                        title={`Open portal with ${mgr.name}'s permissions`}
+                        className="btn-mgr-copy-creds"
+                        onClick={() => {
+                          const userVal = mgr.username || mgr.name.toLowerCase().replace(/\s+/g, '');
+                          const passVal = mgr.password || 'mgr@2018';
+                          const text = `Convenio Mart Store Manager Login:\nUsername: ${userVal}\nPassword: ${passVal}`;
+                          navigator.clipboard.writeText(text);
+                          setCopiedManagerId(mgr.id);
+                          setTimeout(() => setCopiedManagerId(null), 2500);
+                        }}
+                        title="Copy credentials to share with manager"
                       >
-                        <Users size={14} />
-                        <span>Open as {mgr.name.split(' ')[0]}</span>
+                        {copiedManagerId === mgr.id ? (
+                          <>
+                            <Check size={14} color="#10b981" />
+                            <span>Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy size={14} />
+                            <span>Copy Login Info</span>
+                          </>
+                        )}
                       </button>
                       <button 
                         type="button"
@@ -4429,7 +4414,17 @@ export default function App() {
                   required
                   placeholder="e.g. Karthik Raja"
                   value={newManagerName}
-                  onChange={(e) => setNewManagerName(e.target.value)}
+                  onChange={(e) => {
+                    const name = e.target.value;
+                    setNewManagerName(name);
+                    const slug = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+                    if (!newManagerUsername || newManagerUsername === slug.slice(0, -1)) {
+                      setNewManagerUsername(slug);
+                    }
+                    if (!newManagerPassword || newManagerPassword.startsWith('mgr@')) {
+                      setNewManagerPassword(slug ? `mgr@${slug}` : '');
+                    }
+                  }}
                   autoFocus
                 />
               </div>
@@ -4440,10 +4435,36 @@ export default function App() {
                   id="new-mgr-role"
                   type="text"
                   required
-                  placeholder="e.g. Area Operations Manager - OMR Cluster"
+                  placeholder="e.g. Store Manager - OMR Cluster"
                   value={newManagerRole}
                   onChange={(e) => setNewManagerRole(e.target.value)}
                 />
+              </div>
+
+              <div className="form-row-two-col">
+                <div className="form-group-clean">
+                  <label htmlFor="new-mgr-username">Login Username *</label>
+                  <input
+                    id="new-mgr-username"
+                    type="text"
+                    required
+                    placeholder="e.g. karthik"
+                    value={newManagerUsername}
+                    onChange={(e) => setNewManagerUsername(e.target.value.toLowerCase().replace(/\s+/g, ''))}
+                  />
+                </div>
+
+                <div className="form-group-clean">
+                  <label htmlFor="new-mgr-password">Login Password *</label>
+                  <input
+                    id="new-mgr-password"
+                    type="text"
+                    required
+                    placeholder="e.g. mgr@karthik"
+                    value={newManagerPassword}
+                    onChange={(e) => setNewManagerPassword(e.target.value)}
+                  />
+                </div>
               </div>
 
               <div className="form-group-clean">
