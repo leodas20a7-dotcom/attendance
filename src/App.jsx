@@ -343,7 +343,8 @@ export default function App() {
   const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
   const [historySearchTerm, setHistorySearchTerm] = useState('');
   const [historyFilterType, setHistoryFilterType] = useState('all');
-  const [historyScope, setHistoryScope] = useState('employee'); // 'employee' or 'all'
+  const [historyScope, setHistoryScope] = useState('all'); // 'employee' or 'all'
+  const [historySelectedStaff, setHistorySelectedStaff] = useState(''); // Selected staff filter inside drawer
 
   // ================= ADMIN BRANCH & EMPLOYEE EDIT STATE =================
   const [adminSelectedBranchId, setAdminSelectedBranchId] = useState(() => {
@@ -752,6 +753,23 @@ export default function App() {
     return records.filter(isRecordToday);
   }, [records, isRecordToday]);
 
+  // List of distinct staff members who punched today with their counts
+  const todayStaffList = useMemo(() => {
+    const map = new Map();
+    todayRecords.forEach(r => {
+      const name = (r.employeeName || r.name || '').trim();
+      if (name) {
+        map.set(name, (map.get(name) || 0) + 1);
+      }
+    });
+    return Array.from(map.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [todayRecords]);
+
+  // Is employee actively verified and selected in the on-site form right now
+  const isEmpActivelyOnSite = geoStatus === 'in_range' && Boolean(activeFormEmpName);
+
   // Today's attendance records for the currently selected employee
   const currentEmployeeTodayRecords = useMemo(() => {
     if (!activeFormEmpName) return [];
@@ -763,7 +781,13 @@ export default function App() {
   }, [todayRecords, activeFormEmpName]);
 
   const handleOpenHistoryDrawer = () => {
-    setHistoryScope(activeFormEmpName ? 'employee' : 'all');
+    // If user is verified on-site and actively selected an employee on the form, pre-filter to their name.
+    // Otherwise (e.g. outside geofence), show All Staff Today without falsely assuming stale localStorage!
+    if (isEmpActivelyOnSite) {
+      setHistorySelectedStaff(activeFormEmpName);
+    } else {
+      setHistorySelectedStaff('');
+    }
     setHistorySearchTerm('');
     setHistoryFilterType('all');
     setShowHistoryDrawer(true);
@@ -3173,8 +3197,8 @@ export default function App() {
                 <div>
                   <h2 className="history-drawer-title">Attendance History</h2>
                   <p className="history-drawer-subtitle">
-                    {activeFormEmpName && historyScope === 'employee'
-                      ? `Today's check-in & check-out logs for ${activeFormEmpName}`
+                    {historySelectedStaff
+                      ? `Today's check-in & check-out logs for ${historySelectedStaff}`
                       : "Today's check-in and check-out activity"}
                   </p>
                 </div>
@@ -3191,27 +3215,58 @@ export default function App() {
 
             {/* Quick Filters & Search */}
             <div className="history-drawer-controls">
-              {/* Scope Switcher: Employee's Today Punches vs Store-Wide Today */}
-              {activeFormEmpName && (
+              {/* Scope Switcher: Only shown if employee is actively verified on-site in kiosk */}
+              {isEmpActivelyOnSite && (
                 <div className="history-scope-switcher">
                   <button
                     type="button"
-                    className={`history-scope-btn ${historyScope === 'employee' ? 'active' : ''}`}
-                    onClick={() => setHistoryScope('employee')}
+                    className={`history-scope-btn ${historySelectedStaff === activeFormEmpName ? 'active' : ''}`}
+                    onClick={() => {
+                      setHistorySelectedStaff(activeFormEmpName);
+                      setHistoryScope('employee');
+                    }}
                   >
                     <User size={13} />
                     <span>My Punches Today ({currentEmployeeTodayRecords.length})</span>
                   </button>
                   <button
                     type="button"
-                    className={`history-scope-btn ${historyScope === 'all' ? 'active' : ''}`}
-                    onClick={() => setHistoryScope('all')}
+                    className={`history-scope-btn ${!historySelectedStaff ? 'active' : ''}`}
+                    onClick={() => {
+                      setHistorySelectedStaff('');
+                      setHistoryScope('all');
+                    }}
                   >
                     <Store size={13} />
                     <span>All Today ({todayRecords.length})</span>
                   </button>
                 </div>
               )}
+
+              {/* Staff Selector Dropdown inside Drawer */}
+              <div className="history-staff-select-wrapper">
+                <User size={15} className="history-select-icon" />
+                <select
+                  className="history-staff-select"
+                  value={historySelectedStaff}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setHistorySelectedStaff(val);
+                    setHistoryScope(val ? 'employee' : 'all');
+                  }}
+                  aria-label="Filter attendance by staff member"
+                >
+                  <option value="">
+                    All Staff Today ({todayRecords.length} {todayRecords.length === 1 ? 'punch' : 'punches'})
+                  </option>
+                  {todayStaffList.map(st => (
+                    <option key={st.name} value={st.name}>
+                      {st.name} ({st.count} {st.count === 1 ? 'punch' : 'punches'})
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={15} className="history-select-arrow" />
+              </div>
 
               <div className="history-search-wrapper">
                 <Search size={15} className="history-search-icon" />
@@ -3233,8 +3288,12 @@ export default function App() {
               </div>
 
               {(() => {
-                const baseList = (activeFormEmpName && historyScope === 'employee')
-                  ? currentEmployeeTodayRecords
+                const staffTarget = historySelectedStaff.trim().toLowerCase();
+                const baseList = historySelectedStaff
+                  ? todayRecords.filter(r => {
+                      const empName = (r.employeeName || r.name || '').trim().toLowerCase();
+                      return empName === staffTarget || empName.includes(staffTarget) || staffTarget.includes(empName);
+                    })
                   : todayRecords;
                 const inCount = baseList.filter(r => r.type === 'in').length;
                 const outCount = baseList.filter(r => r.type === 'out').length;
@@ -3266,8 +3325,12 @@ export default function App() {
 
             {/* History List */}
             {(() => {
-              const baseList = (activeFormEmpName && historyScope === 'employee')
-                ? currentEmployeeTodayRecords
+              const staffTarget = historySelectedStaff.trim().toLowerCase();
+              const baseList = historySelectedStaff
+                ? todayRecords.filter(r => {
+                    const empName = (r.employeeName || r.name || '').trim().toLowerCase();
+                    return empName === staffTarget || empName.includes(staffTarget) || staffTarget.includes(empName);
+                  })
                 : todayRecords;
 
               const filteredList = baseList.filter((r) => {
@@ -3290,8 +3353,8 @@ export default function App() {
                         <p>
                           {historySearchTerm 
                             ? 'No matching attendance records found for this search today.' 
-                            : (activeFormEmpName && historyScope === 'employee')
-                            ? `No attendance logs marked yet today for ${activeFormEmpName}.`
+                            : historySelectedStaff
+                            ? `No attendance logs marked yet today for ${historySelectedStaff}.`
                             : "Today's check-in and check-out logs will show up here in real time."}
                         </p>
                       </div>
@@ -3361,7 +3424,7 @@ export default function App() {
                   {/* Drawer Footer */}
                   <div className="history-drawer-footer">
                     <span className="history-footer-count">
-                      {filteredList.length} today's attendance {filteredList.length === 1 ? 'log' : 'logs'}
+                      {filteredList.length} {historySelectedStaff ? `${historySelectedStaff}'s ` : "today's "}attendance {filteredList.length === 1 ? 'log' : 'logs'}
                     </span>
                     <button 
                       className="history-footer-done-btn"
