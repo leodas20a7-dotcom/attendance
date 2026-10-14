@@ -51,8 +51,12 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Megaphone,
-  Send
+  Send,
+  Download
 } from 'lucide-react';
+
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 import { 
   getCurrentDeviceLocation, 
@@ -269,6 +273,19 @@ export default function App() {
   const [newCircularTitle, setNewCircularTitle] = useState('');
   const [newCircularMessage, setNewCircularMessage] = useState('');
   const [circularSuccessMsg, setCircularSuccessMsg] = useState('');
+
+  // Monthly Timesheet State (Admin only)
+  const [timesheetYear, setTimesheetYear] = useState(() => new Date().getFullYear());
+  const [timesheetMonth, setTimesheetMonth] = useState(() => new Date().getMonth());
+  const [timesheetBranchId, setTimesheetBranchId] = useState('all');
+  const [timesheetSearch, setTimesheetSearch] = useState('');
+
+  // Individual Staff Attendance Calendar Modal State
+  const [calendarStaff, setCalendarStaff] = useState(null);
+  const [calendarYear, setCalendarYear] = useState(() => new Date().getFullYear());
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date().getMonth());
+  const [calendarSelectedDay, setCalendarSelectedDay] = useState(null);
+  const [calendarSlideDir, setCalendarSlideDir] = useState('fade');
 
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
@@ -1114,6 +1131,476 @@ export default function App() {
       });
     }
   };
+
+  // ================= MONTHLY TIMESHEET / ATTENDANCE GRID (HR & PAYROLL) =================
+  const timesheetMonthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+
+  const handlePrevTimesheetMonth = () => {
+    if (timesheetMonth === 0) {
+      setTimesheetMonth(11);
+      setTimesheetYear(y => y - 1);
+    } else {
+      setTimesheetMonth(m => m - 1);
+    }
+  };
+
+  const handleNextTimesheetMonth = () => {
+    if (timesheetMonth === 11) {
+      setTimesheetMonth(0);
+      setTimesheetYear(y => y + 1);
+    } else {
+      setTimesheetMonth(m => m + 1);
+    }
+  };
+
+  const handleCurrentTimesheetMonth = () => {
+    const now = new Date();
+    setTimesheetYear(now.getFullYear());
+    setTimesheetMonth(now.getMonth());
+  };
+
+  const timesheetDaysInMonth = useMemo(() => {
+    return new Date(timesheetYear, timesheetMonth + 1, 0).getDate();
+  }, [timesheetYear, timesheetMonth]);
+
+  const timesheetDaysArray = useMemo(() => {
+    return Array.from({ length: timesheetDaysInMonth }, (_, i) => i + 1);
+  }, [timesheetDaysInMonth]);
+
+  const isDaySunday = useCallback((day) => {
+    const d = new Date(timesheetYear, timesheetMonth, day);
+    return d.getDay() === 0;
+  }, [timesheetYear, timesheetMonth]);
+
+  const getDayShortName = useCallback((day) => {
+    const d = new Date(timesheetYear, timesheetMonth, day);
+    return d.toLocaleDateString('en-US', { weekday: 'narrow' });
+  }, [timesheetYear, timesheetMonth]);
+
+  // Master list of all staff across branches and records
+  const allTimesheetEmployees = useMemo(() => {
+    const list = [];
+    const seen = new Set();
+
+    branches.forEach(branch => {
+      if (Array.isArray(branch.employees)) {
+        branch.employees.forEach(emp => {
+          const empName = (typeof emp === 'string' ? emp : emp.name || '').trim();
+          if (empName && !seen.has(empName.toLowerCase())) {
+            seen.add(empName.toLowerCase());
+            list.push({
+              id: emp.id || `emp-${empName.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
+              name: empName,
+              role: emp.role || 'Staff',
+              branchId: branch.id,
+              branchName: branch.name
+            });
+          }
+        });
+      }
+    });
+
+    records.forEach(r => {
+      const empName = (r.employeeName || r.name || '').trim();
+      if (empName && !seen.has(empName.toLowerCase())) {
+        seen.add(empName.toLowerCase());
+        list.push({
+          id: `rec-emp-${empName.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
+          name: empName,
+          role: r.employeeRole || 'Staff',
+          branchId: 'other',
+          branchName: r.branchName || 'Convenio Mart'
+        });
+      }
+    });
+
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }, [branches, records]);
+
+  // Filtered employees for timesheet grid
+  const filteredTimesheetEmployees = useMemo(() => {
+    return allTimesheetEmployees.filter(emp => {
+      if (timesheetBranchId !== 'all' && emp.branchId !== timesheetBranchId) {
+        return false;
+      }
+      if (timesheetSearch.trim()) {
+        const query = timesheetSearch.toLowerCase().trim();
+        const matchesName = emp.name.toLowerCase().includes(query);
+        const matchesRole = emp.role.toLowerCase().includes(query);
+        const matchesBranch = emp.branchName.toLowerCase().includes(query);
+        if (!matchesName && !matchesRole && !matchesBranch) return false;
+      }
+      return true;
+    });
+  }, [allTimesheetEmployees, timesheetBranchId, timesheetSearch]);
+
+  // Helper to extract year, month, day from a record
+  const getRecordDateComponents = useCallback((r) => {
+    if (!r) return null;
+    if (r.timestamp && !isNaN(Number(r.timestamp))) {
+      const d = new Date(Number(r.timestamp));
+      if (!isNaN(d.getTime())) {
+        return { year: d.getFullYear(), month: d.getMonth(), day: d.getDate() };
+      }
+    }
+    if (r.id && typeof r.id === 'string' && r.id.startsWith('REC-')) {
+      const rawTs = r.id.slice(4).split('-')[0];
+      const ts = Number(rawTs);
+      if (!isNaN(ts) && ts > 1600000000000) {
+        const d = new Date(ts);
+        if (!isNaN(d.getTime())) {
+          return { year: d.getFullYear(), month: d.getMonth(), day: d.getDate() };
+        }
+      }
+    }
+    if (r.created_at) {
+      const d = new Date(r.created_at);
+      if (!isNaN(d.getTime())) {
+        return { year: d.getFullYear(), month: d.getMonth(), day: d.getDate() };
+      }
+    }
+    if (r.date) {
+      const d = new Date(r.date);
+      if (!isNaN(d.getTime())) {
+        return { year: d.getFullYear(), month: d.getMonth(), day: d.getDate() };
+      }
+      const parts = String(r.date).trim().split(/[\s,/-]+/);
+      if (parts.length >= 3) {
+        const monthMap = {
+          jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+          jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+        };
+        let y = null, m = null, dayNum = null;
+        parts.forEach(p => {
+          const pLower = p.toLowerCase().slice(0, 3);
+          if (monthMap[pLower] !== undefined) {
+            m = monthMap[pLower];
+          } else if (/^\d{4}$/.test(p)) {
+            y = parseInt(p, 10);
+          } else if (/^\d{1,2}$/.test(p)) {
+            const num = parseInt(p, 10);
+            if (dayNum === null && num <= 31) {
+              dayNum = num;
+            }
+          }
+        });
+        if (y !== null && m !== null && dayNum !== null) {
+          return { year: y, month: m, day: dayNum };
+        }
+      }
+    }
+    return null;
+  }, []);
+
+  // Pre-indexed map of records for the active timesheet month
+  const timesheetMonthRecordsMap = useMemo(() => {
+    const map = new Map();
+    records.forEach(r => {
+      const empName = (r.employeeName || r.name || '').trim().toLowerCase();
+      if (!empName) return;
+
+      const comp = getRecordDateComponents(r);
+      if (!comp) return;
+
+      if (comp.year === timesheetYear && comp.month === timesheetMonth) {
+        if (!map.has(empName)) {
+          map.set(empName, {});
+        }
+        const empDays = map.get(empName);
+        if (!empDays[comp.day]) {
+          empDays[comp.day] = [];
+        }
+        empDays[comp.day].push(r);
+      }
+    });
+    return map;
+  }, [records, timesheetYear, timesheetMonth, getRecordDateComponents]);
+
+  // Determine status of an employee on a specific day
+  const getTimesheetDayStatus = useCallback((empName, day) => {
+    const empKey = empName.toLowerCase().trim();
+    const empDays = timesheetMonthRecordsMap.get(empKey);
+    const dayPunches = empDays ? empDays[day] : null;
+
+    if (!dayPunches || dayPunches.length === 0) {
+      return { status: 'none', code: '-', label: 'Absent / Off', punches: [] };
+    }
+
+    const hasMissed = dayPunches.some(p => isMissedCheckoutRecord(p));
+    const hasIn = dayPunches.some(p => p.type === 'in');
+    const hasOut = dayPunches.some(p => p.type === 'out' && !isMissedCheckoutRecord(p));
+
+    if (hasMissed) {
+      return {
+        status: 'missed',
+        code: 'M',
+        label: 'Missed Checkout (11:30 PM)',
+        punches: dayPunches
+      };
+    }
+
+    if (hasIn || hasOut) {
+      return {
+        status: 'present',
+        code: 'P',
+        label: 'Present',
+        punches: dayPunches
+      };
+    }
+
+    return { status: 'none', code: '-', label: 'Absent / Off', punches: [] };
+  }, [timesheetMonthRecordsMap, isMissedCheckoutRecord]);
+
+  // Employee monthly totals calculation
+  const getEmployeeTimesheetTotals = useCallback((empName) => {
+    let presentCount = 0;
+    let missedCount = 0;
+
+    for (let day = 1; day <= timesheetDaysInMonth; day++) {
+      const cell = getTimesheetDayStatus(empName, day);
+      if (cell.status === 'present') {
+        presentCount++;
+      } else if (cell.status === 'missed') {
+        presentCount++;
+        missedCount++;
+      }
+    }
+
+    return { presentCount, missedCount };
+  }, [timesheetDaysInMonth, getTimesheetDayStatus]);
+
+  // Export Timesheet CSV for HR & Payroll
+  const handleExportTimesheetCSV = () => {
+    if (filteredTimesheetEmployees.length === 0) {
+      alert('No employee data available to export for the selected filter.');
+      return;
+    }
+
+    const monthStr = timesheetMonthNames[timesheetMonth];
+    const headerDays = timesheetDaysArray.map(d => `Day ${d} (${d}/${timesheetMonth + 1})`);
+    const csvHeaders = ['Employee Name', 'Branch', 'Role', 'Total Present Days', 'Missed Checkouts', ...headerDays];
+
+    const csvRows = filteredTimesheetEmployees.map(emp => {
+      const totals = getEmployeeTimesheetTotals(emp.name);
+      const dayValues = timesheetDaysArray.map(d => {
+        const cell = getTimesheetDayStatus(emp.name, d);
+        return cell.code;
+      });
+
+      const row = [
+        `"${emp.name.replace(/"/g, '""')}"`,
+        `"${emp.branchName.replace(/"/g, '""')}"`,
+        `"${emp.role.replace(/"/g, '""')}"`,
+        totals.presentCount,
+        totals.missedCount,
+        ...dayValues
+      ];
+      return row.join(',');
+    });
+
+    const csvContent = [csvHeaders.join(','), ...csvRows].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Convenio_Timesheet_${monthStr}_${timesheetYear}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // Download Timesheet as PDF (HR & Payroll Grid)
+  const handleExportTimesheetPDF = () => {
+    if (filteredTimesheetEmployees.length === 0) {
+      alert('No employee data available to export for the selected filter.');
+      return;
+    }
+
+    const monthStr = timesheetMonthNames[timesheetMonth];
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+
+    // Document Branding Header
+    doc.setFontSize(15);
+    doc.setTextColor(15, 23, 42);
+    doc.text('Convenio Mart - Monthly Attendance & Timesheet Report', 28, 30);
+
+    doc.setFontSize(8.5);
+    doc.setTextColor(100, 116, 139);
+    const branchLabel = timesheetBranchId === 'all' 
+      ? `All Branches (${branches.length})` 
+      : (branches.find(b => b.id === timesheetBranchId)?.name || 'Branch');
+    doc.text(`Month: ${monthStr} ${timesheetYear}   |   Branch: ${branchLabel}   |   Total Staff: ${filteredTimesheetEmployees.length}   |   Exported: ${new Date().toLocaleDateString('en-GB')}`, 28, 44);
+
+    // Days headers: number and short weekday (e.g. "1\nTh")
+    const headerDays = timesheetDaysArray.map(d => `${d}\n${getDayShortName(d)}`);
+    const headRow = ['#', 'Staff Member', 'Branch', 'P', 'M', ...headerDays];
+
+    const bodyRows = filteredTimesheetEmployees.map((emp, idx) => {
+      const totals = getEmployeeTimesheetTotals(emp.name);
+      const dayStatuses = timesheetDaysArray.map(d => {
+        const cell = getTimesheetDayStatus(emp.name, d);
+        return cell.code;
+      });
+      return [
+        idx + 1,
+        emp.name,
+        emp.branchName,
+        totals.presentCount,
+        totals.missedCount,
+        ...dayStatuses
+      ];
+    });
+
+    autoTable(doc, {
+      head: [headRow],
+      body: bodyRows,
+      startY: 52,
+      theme: 'grid',
+      styles: {
+        fontSize: 6.5,
+        cellPadding: 2,
+        halign: 'center',
+        valign: 'middle',
+        textColor: [51, 65, 85],
+        lineColor: [226, 232, 240],
+        lineWidth: 0.5,
+      },
+      headStyles: {
+        fillColor: [241, 245, 249],
+        textColor: [15, 23, 42],
+        fontStyle: 'bold',
+        fontSize: 6,
+        halign: 'center',
+      },
+      columnStyles: {
+        0: { cellWidth: 16, halign: 'center' },
+        1: { cellWidth: 85, halign: 'left', fontStyle: 'bold' },
+        2: { cellWidth: 75, halign: 'left', textColor: [100, 116, 139] },
+        3: { cellWidth: 18, halign: 'center', fontStyle: 'bold', textColor: [21, 128, 61], fillColor: [240, 253, 244] },
+        4: { cellWidth: 18, halign: 'center', fontStyle: 'bold', textColor: [180, 83, 9], fillColor: [254, 252, 232] },
+      },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.column.index >= 5) {
+          if (data.cell.raw === 'P') {
+            data.cell.styles.fillColor = [220, 252, 231];
+            data.cell.styles.textColor = [21, 128, 61];
+            data.cell.styles.fontStyle = 'bold';
+          } else if (data.cell.raw === 'M') {
+            data.cell.styles.fillColor = [254, 243, 199];
+            data.cell.styles.textColor = [180, 83, 9];
+            data.cell.styles.fontStyle = 'bold';
+          } else {
+            data.cell.styles.textColor = [203, 213, 225];
+          }
+        }
+      },
+      margin: { left: 28, right: 28, bottom: 20 },
+    });
+
+    doc.save(`Convenio_Timesheet_${monthStr}_${timesheetYear}.pdf`);
+  };
+
+  // ================= INDIVIDUAL STAFF ATTENDANCE CALENDAR MODAL =================
+  const calendarDaysInMonth = useMemo(() => {
+    return new Date(calendarYear, calendarMonth + 1, 0).getDate();
+  }, [calendarYear, calendarMonth]);
+
+  const calendarFirstDayOfWeek = useMemo(() => {
+    return new Date(calendarYear, calendarMonth, 1).getDay(); // 0 = Sunday, 1 = Monday, etc.
+  }, [calendarYear, calendarMonth]);
+
+  const handleOpenStaffCalendar = (emp) => {
+    setCalendarStaff(emp);
+    setCalendarYear(timesheetYear);
+    setCalendarMonth(timesheetMonth);
+    setCalendarSelectedDay(null);
+    setCalendarSlideDir('fade');
+  };
+
+  const handleCloseStaffCalendar = () => {
+    setCalendarStaff(null);
+    setCalendarSelectedDay(null);
+  };
+
+  const handlePrevCalendarMonth = () => {
+    setCalendarSlideDir('right');
+    setCalendarSelectedDay(null);
+    if (calendarMonth === 0) {
+      setCalendarMonth(11);
+      setCalendarYear(y => y - 1);
+    } else {
+      setCalendarMonth(m => m - 1);
+    }
+  };
+
+  const handleNextCalendarMonth = () => {
+    setCalendarSlideDir('left');
+    setCalendarSelectedDay(null);
+    if (calendarMonth === 11) {
+      setCalendarMonth(0);
+      setCalendarYear(y => y + 1);
+    } else {
+      setCalendarMonth(m => m + 1);
+    }
+  };
+
+  const getCalendarDayInfo = useCallback((day) => {
+    if (!calendarStaff || !calendarStaff.name) {
+      return { status: 'none', label: 'No Data', punches: [] };
+    }
+
+    const empTarget = calendarStaff.name.toLowerCase().trim();
+    const dayPunches = records.filter(r => {
+      const empName = (r.employeeName || r.name || '').toLowerCase().trim();
+      if (empName !== empTarget && !empName.includes(empTarget) && !empTarget.includes(empName)) {
+        return false;
+      }
+      const comp = getRecordDateComponents(r);
+      return comp && comp.year === calendarYear && comp.month === calendarMonth && comp.day === day;
+    });
+
+    if (dayPunches.length > 0) {
+      const hasMissed = dayPunches.some(p => isMissedCheckoutRecord(p));
+      const hasIn = dayPunches.some(p => p.type === 'in');
+      const hasOut = dayPunches.some(p => p.type === 'out' && !isMissedCheckoutRecord(p));
+
+      if (hasMissed) {
+        return {
+          status: 'leave', // matches yellow Leave / Missed
+          label: 'Missed Checkout (11:30 PM)',
+          punches: dayPunches
+        };
+      }
+      if (hasIn || hasOut) {
+        return {
+          status: 'present', // matches green Present
+          label: 'Present',
+          punches: dayPunches
+        };
+      }
+    }
+
+    // No punches recorded: evaluate date
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const targetDate = new Date(calendarYear, calendarMonth, day);
+    targetDate.setHours(0, 0, 0, 0);
+
+    if (targetDate.getTime() === today.getTime()) {
+      return { status: 'today', label: 'No punches today yet', punches: [] };
+    } else if (targetDate < today) {
+      if (targetDate.getDay() === 0) {
+        return { status: 'off', label: 'Sunday Weekly Off', punches: [] };
+      }
+      return { status: 'absent', label: 'Absent', punches: [] };
+    } else {
+      return { status: 'future', label: 'Upcoming', punches: [] };
+    }
+  }, [calendarStaff, calendarYear, calendarMonth, records, getRecordDateComponents, isMissedCheckoutRecord]);
 
   // ================= BRANCH MANAGEMENT HANDLERS =================
   const handleAddBranch = (e) => {
@@ -2520,6 +3007,18 @@ export default function App() {
                       <span className="tab-pill-counter">{circulars.length}</span>
                     </button>
                   )}
+                  {authRole === 'admin' && (
+                    <button 
+                      id="tab-btn-timesheet"
+                      className={`admin-tab-btn ${adminTab === 'timesheet' ? 'active' : ''}`}
+                      onClick={() => setAdminTab('timesheet')}
+                    >
+                      <CalendarDays size={16} />
+                      <span className="tab-label-full">Monthly Timesheet</span>
+                      <span className="tab-label-short">Timesheet</span>
+                      <span className="tab-pill-counter" style={{ background: '#ecfdf5', color: '#047857' }}>HR</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -3479,6 +3978,276 @@ export default function App() {
                       ))}
                     </div>
                   )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 5: MONTHLY TIMESHEET / ATTENDANCE GRID (HR & PAYROLL) - ADMIN ONLY */}
+          {adminTab === 'timesheet' && authRole === 'admin' && (
+            <div className="timesheet-portal-view">
+              {/* Header Card */}
+              <div className="timesheet-header-card">
+                <div className="timesheet-header-left">
+                  <div className="timesheet-icon-box">
+                    <CalendarDays size={22} />
+                  </div>
+                  <div>
+                    <div className="timesheet-title-row">
+                      <h3>Monthly Attendance & Timesheet Grid</h3>
+                      <span className="timesheet-role-pill">HR & Payroll</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="timesheet-header-actions">
+                  <button 
+                    type="button"
+                    className="btn-download-pdf"
+                    onClick={handleExportTimesheetPDF}
+                    title="Download Timesheet as PDF"
+                  >
+                    <Download size={15} />
+                    <span>Download as PDF</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Controls Bar: Month Switcher, Branch Filter, Staff Search */}
+              <div className="timesheet-controls-bar">
+                <div className="timesheet-month-nav">
+                  <button 
+                    type="button" 
+                    className="ts-nav-arrow-btn" 
+                    onClick={handlePrevTimesheetMonth}
+                    title="Previous Month"
+                    aria-label="Previous Month"
+                  >
+                    <ChevronLeft size={18} />
+                  </button>
+                  <span className="ts-current-month-label">
+                    {timesheetMonthNames[timesheetMonth]} {timesheetYear}
+                  </span>
+                  <button 
+                    type="button" 
+                    className="ts-nav-arrow-btn" 
+                    onClick={handleNextTimesheetMonth}
+                    title="Next Month"
+                    aria-label="Next Month"
+                  >
+                    <ChevronRight size={18} />
+                  </button>
+                  {(timesheetMonth !== new Date().getMonth() || timesheetYear !== new Date().getFullYear()) && (
+                    <button 
+                      type="button" 
+                      className="ts-today-btn" 
+                      onClick={handleCurrentTimesheetMonth}
+                    >
+                      Current Month
+                    </button>
+                  )}
+                </div>
+
+                <div className="timesheet-filters-group">
+                  {/* Branch Filter */}
+                  <div className="ts-filter-box">
+                    <Building2 size={15} className="ts-filter-icon" />
+                    <select
+                      className="ts-filter-select"
+                      value={timesheetBranchId}
+                      onChange={(e) => setTimesheetBranchId(e.target.value)}
+                      aria-label="Filter by Branch"
+                    >
+                      <option value="all">All Branches ({branches.length})</option>
+                      {branches.map(b => (
+                        <option key={b.id} value={b.id}>{b.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Search Input */}
+                  <div className="ts-search-box">
+                    <Search size={15} className="ts-filter-icon" />
+                    <input 
+                      type="text"
+                      className="ts-search-input"
+                      placeholder="Search staff name..."
+                      value={timesheetSearch}
+                      onChange={(e) => setTimesheetSearch(e.target.value)}
+                    />
+                    {timesheetSearch && (
+                      <button 
+                        type="button" 
+                        className="ts-search-clear" 
+                        onClick={() => setTimesheetSearch('')}
+                      >
+                        <X size={13} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Timesheet Grid Card */}
+              <div className="timesheet-grid-card">
+                {filteredTimesheetEmployees.length === 0 ? (
+                  <div className="timesheet-empty-state">
+                    <Calendar size={36} color="#cbd5e1" />
+                    <p>No staff members match the selected branch or search filter.</p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Desktop View: Full 31-Day Attendance Matrix */}
+                    <div className="timesheet-desktop-view">
+                      <div className="timesheet-table-scroll-wrapper">
+                        <table className="timesheet-table">
+                          <thead>
+                            <tr>
+                              <th className="th-sticky-emp">Staff Member</th>
+                              <th className="th-summary-stat" title="Total Present Days">P</th>
+                              <th className="th-summary-stat th-missed" title="Missed Checkouts">M</th>
+                              {timesheetDaysArray.map(day => {
+                                const isSun = isDaySunday(day);
+                                const dayLetter = getDayShortName(day);
+                                return (
+                                  <th 
+                                    key={day} 
+                                    className={`th-day-col ${isSun ? 'col-sunday' : ''}`}
+                                    title={`${day} ${timesheetMonthNames[timesheetMonth]} (${dayLetter})`}
+                                  >
+                                    <span className="th-day-num">{day}</span>
+                                    <span className="th-day-sub">{dayLetter}</span>
+                                  </th>
+                                );
+                              })}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredTimesheetEmployees.map(emp => {
+                              const totals = getEmployeeTimesheetTotals(emp.name);
+                              return (
+                                <tr key={emp.id} className="timesheet-emp-row">
+                                  <td className="td-sticky-emp">
+                                    <button
+                                      type="button"
+                                      className="ts-emp-clickable-btn"
+                                      onClick={() => handleOpenStaffCalendar(emp)}
+                                      title={`Click to view attendance calendar for ${emp.name}`}
+                                    >
+                                      <div className="ts-emp-info">
+                                        <span className="ts-emp-name">{emp.name}</span>
+                                        <span className="ts-emp-branch-tag">{emp.branchName}</span>
+                                      </div>
+                                    </button>
+                                  </td>
+                                  <td className="td-summary-stat">
+                                    <span className="ts-stat-badge-p">{totals.presentCount}</span>
+                                  </td>
+                                  <td className="td-summary-stat">
+                                    <span className={`ts-stat-badge-m ${totals.missedCount > 0 ? 'has-missed' : ''}`}>
+                                      {totals.missedCount}
+                                    </span>
+                                  </td>
+                                  {timesheetDaysArray.map(day => {
+                                    const cell = getTimesheetDayStatus(emp.name, day);
+                                    const isSun = isDaySunday(day);
+                                    
+                                    let tooltipText = `${emp.name} - ${day} ${timesheetMonthNames[timesheetMonth]}: ${cell.label}`;
+                                    if (cell.punches && cell.punches.length > 0) {
+                                      const punchTimes = cell.punches.map(p => `${p.type.toUpperCase()}: ${p.shortTime || p.time}`).join(' | ');
+                                      tooltipText += ` (${punchTimes})`;
+                                    }
+
+                                    return (
+                                      <td 
+                                        key={day} 
+                                        className={`td-day-cell ${isSun ? 'cell-sunday' : ''}`}
+                                        title={tooltipText}
+                                      >
+                                        {cell.status === 'present' ? (
+                                          <span className="cell-pill cell-p">P</span>
+                                        ) : cell.status === 'missed' ? (
+                                          <span className="cell-pill cell-m">M</span>
+                                        ) : (
+                                          <span className="cell-pill cell-off">-</span>
+                                        )}
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Mobile View: Clean Staff Names Only List */}
+                    <div className="timesheet-mobile-staff-view">
+                      <div className="ts-mobile-list-header">
+                        <span>Staff Members ({filteredTimesheetEmployees.length})</span>
+                        <span className="ts-mobile-hint">Tap name to view calendar</span>
+                      </div>
+                      <div className="ts-mobile-staff-list">
+                        {filteredTimesheetEmployees.map(emp => {
+                          const totals = getEmployeeTimesheetTotals(emp.name);
+                          return (
+                            <button
+                              key={emp.id}
+                              type="button"
+                              className="ts-mobile-staff-card"
+                              onClick={() => handleOpenStaffCalendar(emp)}
+                              title={`Tap to view calendar for ${emp.name}`}
+                            >
+                              <div className="ts-mobile-staff-left">
+                                <div className="ts-mobile-avatar">
+                                  {emp.name.charAt(0).toUpperCase()}
+                                </div>
+                                <div className="ts-mobile-info">
+                                  <strong className="ts-mobile-name">{emp.name}</strong>
+                                  <span className="ts-mobile-branch">{emp.branchName}</span>
+                                </div>
+                              </div>
+                              <div className="ts-mobile-staff-right">
+                                <span className="ts-mobile-stat-p" title="Days Present">
+                                  {totals.presentCount} P
+                                </span>
+                                {totals.missedCount > 0 && (
+                                  <span className="ts-mobile-stat-m" title="Missed Checkouts">
+                                    {totals.missedCount} M
+                                  </span>
+                                )}
+                                <ChevronRight size={16} className="ts-mobile-chevron" />
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Bottom Quick Legend */}
+              <div className="timesheet-legend-bar">
+                <div className="legend-items-list">
+                  <div className="legend-item">
+                    <span className="cell-pill cell-p">P</span>
+                    <span>Present</span>
+                  </div>
+                  <div className="legend-item">
+                    <span className="cell-pill cell-m">M</span>
+                    <span>Missed Checkout</span>
+                  </div>
+                  <div className="legend-item">
+                    <span className="cell-pill cell-off">-</span>
+                    <span>Absent / Off</span>
+                  </div>
+                </div>
+                <div className="legend-meta-info">
+                  <span>Showing {filteredTimesheetEmployees.length} Staff</span>
+                  <span>•</span>
+                  <span>{timesheetMonthNames[timesheetMonth]} {timesheetYear}</span>
                 </div>
               </div>
             </div>
@@ -5126,6 +5895,165 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL: INDIVIDUAL ATTENDANCE CALENDAR ================= */}
+      {calendarStaff && (
+        <div className="cal-modal-overlay" onClick={handleCloseStaffCalendar}>
+          <div className="cal-modal-card" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="cal-modal-header">
+              <div className="cal-title-box">
+                <span className="cal-icon-emoji" role="img" aria-label="Calendar">🗓️</span>
+                <div>
+                  <h3 className="cal-modal-title">Attendance Calendar</h3>
+                  <span className="cal-staff-subtitle">{calendarStaff.name} • {calendarStaff.branchName}</span>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                className="cal-close-btn" 
+                onClick={handleCloseStaffCalendar}
+                aria-label="Close Calendar"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Month Navigator */}
+            <div className="cal-month-nav">
+              <button 
+                type="button" 
+                className="cal-nav-arrow-btn" 
+                onClick={handlePrevCalendarMonth}
+                title="Previous Month"
+                aria-label="Previous Month"
+              >
+                <ArrowLeft size={14} />
+              </button>
+              <div className="cal-month-display-wrapper">
+                <span 
+                  key={`month-${calendarYear}-${calendarMonth}`}
+                  className={`cal-month-display cal-trans-${calendarSlideDir}`}
+                >
+                  {timesheetMonthNames[calendarMonth]} {calendarYear}
+                </span>
+              </div>
+              <button 
+                type="button" 
+                className="cal-nav-arrow-btn" 
+                onClick={handleNextCalendarMonth}
+                title="Next Month"
+                aria-label="Next Month"
+              >
+                <ArrowRight size={14} />
+              </button>
+            </div>
+
+            {/* Weekdays Header */}
+            <div className="cal-weekdays-grid">
+              <span>S</span>
+              <span>M</span>
+              <span>T</span>
+              <span>W</span>
+              <span>T</span>
+              <span>F</span>
+              <span>S</span>
+            </div>
+
+            {/* Days Grid Viewport with smooth slide transition on month switch */}
+            <div className="cal-grid-viewport">
+              <div 
+                key={`grid-${calendarYear}-${calendarMonth}`}
+                className={`cal-days-grid cal-trans-${calendarSlideDir}`}
+              >
+                {/* Empty leading days */}
+                {Array.from({ length: calendarFirstDayOfWeek }).map((_, i) => (
+                  <div key={`empty-${i}`} className="cal-day-cell empty" />
+                ))}
+
+                {/* Month days */}
+                {Array.from({ length: calendarDaysInMonth }).map((_, i) => {
+                  const day = i + 1;
+                  const info = getCalendarDayInfo(day);
+                  const isSelected = calendarSelectedDay === day;
+
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      className={`cal-day-cell cell-status-${info.status} ${isSelected ? 'selected' : ''}`}
+                      onClick={() => setCalendarSelectedDay(day)}
+                      title={`${day} ${timesheetMonthNames[calendarMonth]}: ${info.label}`}
+                    >
+                      <span className="cal-day-number">{day}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Interactive Details Box */}
+            <div className="cal-details-card">
+              {calendarSelectedDay ? (() => {
+                const selectedInfo = getCalendarDayInfo(calendarSelectedDay);
+                const dateObj = new Date(calendarYear, calendarMonth, calendarSelectedDay);
+                const weekdayName = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
+
+                return (
+                  <div className="cal-selected-info">
+                    <div className="cal-selected-header">
+                      <strong>{weekdayName}, {calendarSelectedDay} {timesheetMonthNames[calendarMonth]}</strong>
+                      <span className={`cal-info-badge badge-${selectedInfo.status}`}>
+                        {selectedInfo.label}
+                      </span>
+                    </div>
+
+                    {selectedInfo.punches && selectedInfo.punches.length > 0 ? (
+                      <div className="cal-punches-list">
+                        {selectedInfo.punches.map((p, idx) => (
+                          <div key={p.id || idx} className="cal-punch-row">
+                            <span className={`cal-punch-type ${p.type === 'in' ? 'type-in' : 'type-out'}`}>
+                              {p.type === 'in' ? 'Check In' : isMissedCheckoutRecord(p) ? 'Missed Out' : 'Check Out'}
+                            </span>
+                            <span className="cal-punch-time">{p.shortTime || p.time}</span>
+                            <span className="cal-punch-branch">{p.branchName || calendarStaff.branchName}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="cal-no-punch-note">
+                        {selectedInfo.status === 'off' 
+                          ? 'Scheduled weekly off (Sunday)' 
+                          : selectedInfo.status === 'absent' 
+                          ? 'No attendance punches recorded for this working day.' 
+                          : 'No punches for this date.'}
+                      </p>
+                    )}
+                  </div>
+                );
+              })() : (
+                <span className="cal-details-placeholder">Click a date to view details</span>
+              )}
+            </div>
+
+            {/* Bottom Legend */}
+            <div className="cal-legend-footer">
+              <div className="cal-legend-item">
+                <span className="legend-box box-present" />
+                <span>Present</span>
+              </div>
+              <div className="cal-legend-item">
+                <span className="legend-box box-leave" />
+                <span>Leave</span>
+              </div>
+              <div className="cal-legend-item">
+                <span className="legend-box box-absent" />
+                <span>Absent</span>
+              </div>
+            </div>
           </div>
         </div>
       )}
