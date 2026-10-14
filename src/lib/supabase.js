@@ -90,6 +90,41 @@ CREATE POLICY "Public full access to circulars" ON public.circulars FOR ALL USIN
 `;
 
 /**
+ * SQL script for automatically clearing attendance selfie photos after 30 days
+ * (Runs every day at midnight via pg_cron, keeping attendance punch history 100% intact)
+ */
+export const AUTO_PURGE_PHOTOS_SQL = `-- 1. Enable pg_cron extension
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+
+-- 2. Create the function that clears photos older than 30 days
+CREATE OR REPLACE FUNCTION public.delete_old_attendance_photos()
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  UPDATE public.attendance_records
+  SET photo = NULL
+  WHERE created_at < NOW() - INTERVAL '30 days'
+    AND photo IS NOT NULL;
+END;
+$$;
+
+-- 3. Unschedule existing job if already created (prevents duplicates)
+SELECT cron.unschedule('purge-old-attendance-photos-daily')
+WHERE EXISTS (
+  SELECT 1 FROM cron.job WHERE jobname = 'purge-old-attendance-photos-daily'
+);
+
+-- 4. Schedule the job to run every night at midnight (00:00 UTC)
+SELECT cron.schedule(
+  'purge-old-attendance-photos-daily',
+  '0 0 * * *',
+  'SELECT public.delete_old_attendance_photos();'
+);
+`;
+
+/**
  * Check if Supabase tables exist and connection is live
  */
 export async function checkSupabaseStatus() {
