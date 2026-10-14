@@ -259,6 +259,7 @@ export async function fetchAttendanceFromSupabase() {
       time: r.time,
       shortTime: r.short_time,
       photo: r.photo,
+      missedCheckout: Boolean(r.id?.includes('AUTO') || r.short_time?.includes('Missed')),
       location: {
         lat: r.lat,
         lng: r.lng,
@@ -284,7 +285,7 @@ export async function saveAttendanceToSupabase(record) {
       type: record.type,
       date: record.date,
       time: record.time,
-      short_time: record.shortTime,
+      short_time: record.missedCheckout ? '11:30 PM (Missed)' : record.shortTime,
       photo: record.photo,
       lat: record.location?.lat,
       lng: record.location?.lng,

@@ -757,6 +757,109 @@ export default function App() {
     return false;
   }, []);
 
+  // Helper to check if a record is marked as a missed checkout
+  const isMissedCheckoutRecord = useCallback((r) => {
+    return Boolean(r && (r.missedCheckout || r.isAutoCheckout || r.id?.includes('AUTO') || r.shortTime?.includes('Missed')));
+  }, []);
+
+  // Auto-Checkout: automatically mark check-out for staff who forgot to check out after 11:30 PM
+  const checkAndApplyMissedCheckouts = useCallback((currentRecords) => {
+    if (!Array.isArray(currentRecords) || currentRecords.length === 0) return currentRecords;
+
+    const now = new Date();
+    // After 11:30 PM check (23:30 or later)
+    const isPast1130PMToday = now.getHours() > 23 || (now.getHours() === 23 && now.getMinutes() >= 30);
+
+    // Group records by employeeName and date
+    const empDateMap = new Map();
+
+    currentRecords.forEach(r => {
+      const empName = (r.employeeName || r.name || '').trim();
+      const date = (r.date || '').trim();
+      if (!empName || !date) return;
+
+      const key = `${empName.toLowerCase()}___${date.toLowerCase()}`;
+      if (!empDateMap.has(key)) {
+        empDateMap.set(key, { empName, date, punches: [] });
+      }
+      empDateMap.get(key).punches.push(r);
+    });
+
+    const newAutoRecords = [];
+
+    empDateMap.forEach(({ empName, date, punches }) => {
+      // Sort punches chronologically (oldest to newest)
+      const sorted = [...punches].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+      const lastPunch = sorted[sorted.length - 1];
+
+      // If the latest punch on that date is an unclosed 'in'
+      if (lastPunch && lastPunch.type === 'in') {
+        const isToday = isRecordToday(lastPunch);
+        const isEligible = isToday ? isPast1130PMToday : true;
+
+        if (isEligible) {
+          const autoId = `REC-AUTO-${empName.toLowerCase().replace(/[^a-z0-9]/g, '')}-${date.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+          const alreadyExists = currentRecords.some(r => 
+            r.id === autoId || 
+            (r.employeeName?.toLowerCase() === empName.toLowerCase() && 
+             r.date?.toLowerCase() === date.toLowerCase() && 
+             r.type === 'out')
+          );
+
+          if (!alreadyExists) {
+            const autoRecord = {
+              id: autoId,
+              timestamp: (lastPunch.timestamp || Date.now()) + 3600000,
+              employeeName: empName,
+              employeeRole: lastPunch.employeeRole || 'Staff',
+              branchName: lastPunch.branchName || 'Convenio Mart',
+              type: 'out',
+              date: lastPunch.date || date,
+              time: '11:30:00 PM',
+              shortTime: '11:30 PM',
+              photo: lastPunch.photo || null,
+              geofenceVerified: false,
+              missedCheckout: true,
+              isAutoCheckout: true,
+              location: {
+                lat: null,
+                lng: null,
+                placeName: 'Auto Check-Out (Missed Checkout after 11:30 PM)'
+              }
+            };
+            newAutoRecords.push(autoRecord);
+          }
+        }
+      }
+    });
+
+    if (newAutoRecords.length > 0) {
+      newAutoRecords.forEach(rec => {
+        saveAttendanceToSupabase(rec);
+      });
+      const updated = [...newAutoRecords, ...currentRecords];
+      try {
+        localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(updated));
+      } catch (e) {
+        console.warn('Failed to save auto-records to storage:', e);
+      }
+      return updated;
+    }
+
+    return currentRecords;
+  }, [isRecordToday]);
+
+  // Periodic check for 11:30 PM cutoff and initial missed checkouts
+  useEffect(() => {
+    setRecords(prev => checkAndApplyMissedCheckouts(prev));
+
+    const timer = setInterval(() => {
+      setRecords(prev => checkAndApplyMissedCheckouts(prev));
+    }, 60000);
+
+    return () => clearInterval(timer);
+  }, [checkAndApplyMissedCheckouts]);
+
   // Memoized Today's Check Ins count
   const todayCheckInsCount = useMemo(() => {
     return records.filter(r => r.type === 'in' && isRecordToday(r)).length;
@@ -2947,9 +3050,9 @@ export default function App() {
 
                           {/* Action */}
                           <td>
-                            <span className={`table-badge ${item.type === 'in' ? 'badge-in' : 'badge-out'}`}>
+                            <span className={`table-badge ${item.type === 'in' ? 'badge-in' : isMissedCheckoutRecord(item) ? 'badge-missed' : 'badge-out'}`}>
                               {item.type === 'in' ? <LogIn size={13} /> : <LogOut size={13} />}
-                              <span>{item.type === 'in' ? 'Check In' : 'Check Out'}</span>
+                              <span>{item.type === 'in' ? 'Check In' : isMissedCheckoutRecord(item) ? 'Check Out (Missed Checkout)' : 'Check Out'}</span>
                             </span>
                           </td>
 
@@ -3662,9 +3765,9 @@ export default function App() {
                               {/* Row 1: Employee Name & Action Pill */}
                               <div className="history-log-header-row">
                                 <strong className="history-log-name">{item.employeeName}</strong>
-                                <div className={`history-action-pill ${item.type === 'in' ? 'pill-in' : 'pill-out'}`}>
+                                <div className={`history-action-pill ${item.type === 'in' ? 'pill-in' : isMissedCheckoutRecord(item) ? 'pill-missed' : 'pill-out'}`}>
                                   {item.type === 'in' ? <LogIn size={11} /> : <LogOut size={11} />}
-                                  <span>{item.type === 'in' ? 'Check In' : 'Check Out'}</span>
+                                  <span>{item.type === 'in' ? 'Check In' : isMissedCheckoutRecord(item) ? 'Check Out (Missed Checkout)' : 'Check Out'}</span>
                                 </div>
                               </div>
 
@@ -4505,9 +4608,9 @@ export default function App() {
             {/* Modal Top Bar */}
             <div className="receipt-header">
               <div className="receipt-header-left">
-                <span className={`receipt-type-pill ${selectedRecord.type === 'in' ? 'pill-checkin' : 'pill-checkout'}`}>
+                <span className={`receipt-type-pill ${selectedRecord.type === 'in' ? 'pill-checkin' : isMissedCheckoutRecord(selectedRecord) ? 'pill-missed' : 'pill-checkout'}`}>
                   {selectedRecord.type === 'in' ? <LogIn size={13} /> : <LogOut size={13} />}
-                  <span>{selectedRecord.type === 'in' ? 'Check In' : 'Check Out'}</span>
+                  <span>{selectedRecord.type === 'in' ? 'Check In' : isMissedCheckoutRecord(selectedRecord) ? 'Check Out (Missed Checkout)' : 'Check Out'}</span>
                 </span>
                 <span className="receipt-date-text">{selectedRecord.date}</span>
               </div>
@@ -4532,8 +4635,14 @@ export default function App() {
                   }}
                   title={selectedRecord.disablePhotoZoom ? selectedRecord.employeeName : "Click to view full photo"}
                 >
-                  <img src={selectedRecord.photo} alt={selectedRecord.employeeName} className="receipt-avatar-img" decoding="async" width="60" height="60" />
-                  {!selectedRecord.disablePhotoZoom && (
+                  {selectedRecord.photo ? (
+                    <img src={selectedRecord.photo} alt={selectedRecord.employeeName} className="receipt-avatar-img" decoding="async" width="60" height="60" />
+                  ) : (
+                    <div className="receipt-avatar-initial" style={{ width: 60, height: 60, borderRadius: 12, background: '#fee2e2', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '1.4rem' }}>
+                      {selectedRecord.employeeName ? selectedRecord.employeeName.charAt(0).toUpperCase() : 'U'}
+                    </div>
+                  )}
+                  {!selectedRecord.disablePhotoZoom && selectedRecord.photo && (
                     <div className="receipt-zoom-hint">
                       <Eye size={16} />
                     </div>

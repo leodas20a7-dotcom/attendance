@@ -1762,6 +1762,12 @@ body {
   border: 1px solid #cbd5e1;
 }
 
+.badge-missed {
+  background: #fff7ed;
+  color: #c2410c;
+  border: 1px solid #fed7aa;
+}
+
 .table-time-cell {
   display: flex;
   flex-direction: column;
@@ -2548,6 +2554,12 @@ body {
   background: #f1f5f9;
   color: #475569;
   border: 1px solid #cbd5e1;
+}
+
+.receipt-type-pill.pill-missed {
+  background: #fff7ed;
+  color: #c2410c;
+  border: 1px solid #fed7aa;
 }
 
 .receipt-date-text {
@@ -3935,6 +3947,12 @@ body {
   background: #f1f5f9;
   color: #475569;
   border: 1px solid #cbd5e1;
+}
+
+.history-action-pill.pill-missed {
+  background: #fff7ed;
+  color: #c2410c;
+  border: 1px solid #fed7aa;
 }
 
 .history-log-branch-row {
