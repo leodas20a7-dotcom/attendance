@@ -49,7 +49,9 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronsLeft,
-  ChevronsRight
+  ChevronsRight,
+  Megaphone,
+  Send
 } from 'lucide-react';
 
 import { 
@@ -71,7 +73,9 @@ import {
   STORAGE_KEY_BRANCHES, 
   STORAGE_KEY_RECORDS,
   STORAGE_KEY_SELECTED_BRANCH,
-  STORAGE_KEY_SELECTED_EMP 
+  STORAGE_KEY_SELECTED_EMP,
+  getStoredCirculars,
+  saveStoredCirculars
 } from './data/defaultBranches';
 
 import { 
@@ -88,6 +92,9 @@ import {
   fetchManagersFromSupabase,
   syncManagerToSupabase,
   removeManagerFromSupabase,
+  fetchCircularsFromSupabase,
+  syncCircularToSupabase,
+  removeCircularFromSupabase,
   SUPABASE_SCHEMA_SQL
 } from './lib/supabase';
 
@@ -256,6 +263,12 @@ export default function App() {
   const [newManagerEmail, setNewManagerEmail] = useState('');
   const [copiedManagerId, setCopiedManagerId] = useState(null);
   const [visiblePasswords, setVisiblePasswords] = useState({});
+
+  // Circulars State (Common to all, admin only sends)
+  const [circulars, setCirculars] = useState(getStoredCirculars);
+  const [newCircularTitle, setNewCircularTitle] = useState('');
+  const [newCircularMessage, setNewCircularMessage] = useState('');
+  const [circularSuccessMsg, setCircularSuccessMsg] = useState('');
 
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
@@ -466,11 +479,12 @@ export default function App() {
         setSupabaseStatus(status);
 
         if (status.tablesReady) {
-          // Concurrently fetch branches, attendance records & managers from Supabase
-          const [cloudBranches, cloudRecords, cloudManagers] = await Promise.all([
+          // Concurrently fetch branches, attendance records, managers & circulars from Supabase
+          const [cloudBranches, cloudRecords, cloudManagers, cloudCirculars] = await Promise.all([
             fetchBranchesFromSupabase(),
             fetchAttendanceFromSupabase(),
-            fetchManagersFromSupabase()
+            fetchManagersFromSupabase(),
+            fetchCircularsFromSupabase()
           ]);
 
           if (cloudBranches && cloudBranches.length > 0) {
@@ -497,6 +511,11 @@ export default function App() {
             setManagersList(cloudManagers);
             saveStoredManagers(cloudManagers);
           }
+
+          if (cloudCirculars && Array.isArray(cloudCirculars) && cloudCirculars.length > 0) {
+            setCirculars(cloudCirculars);
+            saveStoredCirculars(cloudCirculars);
+          }
         }
       } catch (err) {
         console.error('Supabase init error:', err);
@@ -514,6 +533,11 @@ export default function App() {
     setCopiedSql(true);
     setTimeout(() => setCopiedSql(false), 2500);
   };
+
+  // Sync circulars to localStorage
+  useEffect(() => {
+    saveStoredCirculars(circulars);
+  }, [circulars]);
 
   // Sync branches to localStorage
   useEffect(() => {
@@ -933,6 +957,58 @@ export default function App() {
         type: 'info'
       });
       setTimeout(() => setTransferToast(null), 4000);
+    }
+  };
+
+  // ================= CIRCULAR HANDLERS (ADMIN ONLY, BROADCAST TO ALL) =================
+  const handleSendCircular = async (e) => {
+    if (e) e.preventDefault();
+    if (authRole !== 'admin') {
+      alert('Only administrators can send circulars.');
+      return;
+    }
+    if (!newCircularTitle.trim() || !newCircularMessage.trim()) return;
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    const newCirc = {
+      id: `circ-${Date.now()}`,
+      title: newCircularTitle.trim(),
+      message: newCircularMessage.trim(),
+      date: dateStr,
+      time: timeStr,
+      timestamp: Date.now(),
+      sender: 'Admin'
+    };
+
+    const updated = [newCirc, ...circulars];
+    setCirculars(updated);
+    saveStoredCirculars(updated);
+    syncCircularToSupabase(newCirc);
+
+    setNewCircularTitle('');
+    setNewCircularMessage('');
+    setCircularSuccessMsg('Circular published and sent to all branches successfully!');
+    logAdminAction('circular_sent', `Sent circular "${newCirc.title}" to all branches`, {
+      title: newCirc.title
+    });
+    setTimeout(() => setCircularSuccessMsg(''), 4000);
+  };
+
+  const handleDeleteCircular = async (circularId) => {
+    if (authRole !== 'admin') return;
+    const circ = circulars.find(c => c.id === circularId);
+    if (!circ) return;
+    if (window.confirm(`Are you sure you want to delete circular "${circ.title}"?`)) {
+      const updated = circulars.filter(c => c.id !== circularId);
+      setCirculars(updated);
+      saveStoredCirculars(updated);
+      removeCircularFromSupabase(circularId);
+      logAdminAction('circular_deleted', `Deleted circular "${circ.title}"`, {
+        title: circ.title
+      });
     }
   };
 
@@ -2329,6 +2405,18 @@ export default function App() {
                       <span className="tab-pill-counter">{managersList.length}</span>
                     </button>
                   )}
+                  {authRole === 'admin' && (
+                    <button 
+                      id="tab-btn-circulars"
+                      className={`admin-tab-btn ${adminTab === 'circulars' ? 'active' : ''}`}
+                      onClick={() => setAdminTab('circulars')}
+                    >
+                      <Megaphone size={16} />
+                      <span className="tab-label-full">Circulars</span>
+                      <span className="tab-label-short">Circular</span>
+                      <span className="tab-pill-counter">{circulars.length}</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -3174,6 +3262,124 @@ export default function App() {
               </div>
             </div>
           )}
+
+          {/* TAB 4: CIRCULARS & NOTICES (ADMIN ONLY, COMMON TO ALL) */}
+          {adminTab === 'circulars' && authRole === 'admin' && (
+            <div className="circulars-portal-view">
+              {/* Header Card */}
+              <div className="circulars-header-card">
+                <div className="circ-header-info">
+                  <div className="circ-header-icon-box">
+                    <Megaphone size={22} />
+                  </div>
+                  <div>
+                    <div className="circ-title-row">
+                      <h3>Circulars & Announcements</h3>
+                      <span className="circ-count-pill">{circulars.length} Published</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {circularSuccessMsg && (
+                <div className="circular-success-toast">
+                  <CheckCircle2 size={16} />
+                  <span>{circularSuccessMsg}</span>
+                </div>
+              )}
+
+              {/* 2-Column Clean Layout */}
+              <div className="circulars-content-layout">
+                {/* Compose Form */}
+                <div className="circular-compose-card">
+                  <div className="compose-header">
+                    <Send size={18} className="compose-icon" />
+                    <h4>Send Circular to All</h4>
+                  </div>
+                  <form onSubmit={handleSendCircular} className="compose-form">
+                    <div className="form-group-clean">
+                      <label htmlFor="circ-title-input">Circular Title / Subject *</label>
+                      <input
+                        id="circ-title-input"
+                        type="text"
+                        required
+                        placeholder="e.g. Festival Working Hours / Monthly Meeting Notice"
+                        value={newCircularTitle}
+                        onChange={(e) => setNewCircularTitle(e.target.value)}
+                      />
+                    </div>
+
+                    <div className="form-group-clean">
+                      <label htmlFor="circ-message-input">Circular Message *</label>
+                      <textarea
+                        id="circ-message-input"
+                        required
+                        rows={4}
+                        placeholder="Write circular announcement details here..."
+                        value={newCircularMessage}
+                        onChange={(e) => setNewCircularMessage(e.target.value)}
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="btn-send-circular"
+                      disabled={!newCircularTitle.trim() || !newCircularMessage.trim()}
+                    >
+                      <Send size={15} />
+                      <span>Send Circular to All</span>
+                    </button>
+                  </form>
+                </div>
+
+                {/* Published Circulars Feed */}
+                <div className="circular-feed-card">
+                  <div className="feed-header">
+                    <h4>Published Circulars ({circulars.length})</h4>
+                    <span className="feed-badge">Common to All</span>
+                  </div>
+
+                  {circulars.length === 0 ? (
+                    <div className="circular-empty-state">
+                      <Megaphone size={36} color="#cbd5e1" />
+                      <p>No circulars published yet</p>
+                      <span>Compose a circular on the left to send an announcement to all staff.</span>
+                    </div>
+                  ) : (
+                    <div className="circulars-feed-list">
+                      {circulars.map((circ) => (
+                        <div key={circ.id} className="admin-circular-item">
+                          <div className="circ-item-head">
+                            <div className="circ-item-title-col">
+                              <span className="circ-notice-pill">Official Circular</span>
+                              <h5>{circ.title}</h5>
+                            </div>
+                            <div className="circ-item-actions">
+                              <span className="circ-timestamp">{circ.date} • {circ.time}</span>
+                              <button
+                                type="button"
+                                className="circ-delete-btn"
+                                onClick={() => handleDeleteCircular(circ.id)}
+                                title="Delete Circular"
+                                aria-label="Delete Circular"
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </div>
+                          </div>
+                          <p className="circ-item-body">{circ.message}</p>
+                          <div className="circ-item-footer">
+                            <span className="circ-sender-tag">Posted by: <strong>{circ.sender || 'Admin'}</strong></span>
+                            <span className="circ-scope-tag">• Broadcasted to All Branches</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </main>
         )
       )}
@@ -3195,11 +3401,15 @@ export default function App() {
                   <History size={20} />
                 </div>
                 <div>
-                  <h2 className="history-drawer-title">Attendance History</h2>
+                  <h2 className="history-drawer-title">
+                    {historyFilterType === 'circular' ? 'Notices & Circulars' : 'Attendance History'}
+                  </h2>
                   <p className="history-drawer-subtitle">
-                    {historySelectedStaff
-                      ? `Today's check-in & check-out logs for ${historySelectedStaff}`
-                      : "Today's check-in and check-out activity"}
+                    {historyFilterType === 'circular'
+                      ? 'Official circulars common to all staff & branches'
+                      : historySelectedStaff
+                        ? `Today's check-in & check-out logs for ${historySelectedStaff}`
+                        : "Today's check-in and check-out activity"}
                   </p>
                 </div>
               </div>
@@ -3216,7 +3426,7 @@ export default function App() {
             {/* Quick Filters & Search */}
             <div className="history-drawer-controls">
               {/* Scope Switcher: Only shown if employee is actively verified on-site in kiosk */}
-              {isEmpActivelyOnSite && (
+              {historyFilterType !== 'circular' && isEmpActivelyOnSite && (
                 <div className="history-scope-switcher">
                   <button
                     type="button"
@@ -3244,35 +3454,37 @@ export default function App() {
               )}
 
               {/* Staff Selector Dropdown inside Drawer */}
-              <div className="history-staff-select-wrapper">
-                <User size={15} className="history-select-icon" />
-                <select
-                  className="history-staff-select"
-                  value={historySelectedStaff}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setHistorySelectedStaff(val);
-                    setHistoryScope(val ? 'employee' : 'all');
-                  }}
-                  aria-label="Filter attendance by staff member"
-                >
-                  <option value="">
-                    All Staff Today ({todayRecords.length} {todayRecords.length === 1 ? 'punch' : 'punches'})
-                  </option>
-                  {todayStaffList.map(st => (
-                    <option key={st.name} value={st.name}>
-                      {st.name} ({st.count} {st.count === 1 ? 'punch' : 'punches'})
+              {historyFilterType !== 'circular' && (
+                <div className="history-staff-select-wrapper">
+                  <User size={15} className="history-select-icon" />
+                  <select
+                    className="history-staff-select"
+                    value={historySelectedStaff}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setHistorySelectedStaff(val);
+                      setHistoryScope(val ? 'employee' : 'all');
+                    }}
+                    aria-label="Filter attendance by staff member"
+                  >
+                    <option value="">
+                      All Staff Today ({todayRecords.length} {todayRecords.length === 1 ? 'punch' : 'punches'})
                     </option>
-                  ))}
-                </select>
-                <ChevronDown size={15} className="history-select-arrow" />
-              </div>
+                    {todayStaffList.map(st => (
+                      <option key={st.name} value={st.name}>
+                        {st.name} ({st.count} {st.count === 1 ? 'punch' : 'punches'})
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={15} className="history-select-arrow" />
+                </div>
+              )}
 
               <div className="history-search-wrapper">
                 <Search size={15} className="history-search-icon" />
                 <input
                   type="text"
-                  placeholder="Search staff name or branch..."
+                  placeholder={historyFilterType === 'circular' ? "Search circulars..." : "Search staff name or branch..."}
                   value={historySearchTerm}
                   onChange={(e) => setHistorySearchTerm(e.target.value)}
                   className="history-search-input"
@@ -3318,124 +3530,193 @@ export default function App() {
                     >
                       Check Out ({outCount})
                     </button>
+                    <button
+                      id="tab-history-circular"
+                      className={`history-filter-chip chip-circular ${historyFilterType === 'circular' ? 'active' : ''}`}
+                      onClick={() => setHistoryFilterType('circular')}
+                    >
+                      Circular ({circulars.length})
+                    </button>
                   </div>
                 );
               })()}
             </div>
 
-            {/* History List */}
-            {(() => {
-              const staffTarget = historySelectedStaff.trim().toLowerCase();
-              const baseList = historySelectedStaff
-                ? todayRecords.filter(r => {
-                    const empName = (r.employeeName || r.name || '').trim().toLowerCase();
-                    return empName === staffTarget || empName.includes(staffTarget) || staffTarget.includes(empName);
-                  })
-                : todayRecords;
+            {/* History List or Circulars List */}
+            {historyFilterType === 'circular' ? (
+              <>
+                <div className="history-drawer-list">
+                  {(() => {
+                    const s = historySearchTerm.trim().toLowerCase();
+                    const filteredCircs = circulars.filter(c => 
+                      !s || 
+                      (c.title && c.title.toLowerCase().includes(s)) || 
+                      (c.message && c.message.toLowerCase().includes(s))
+                    );
 
-              const filteredList = baseList.filter((r) => {
-                const s = historySearchTerm.toLowerCase();
-                const matchesSearch = 
-                  !s || 
-                  r.employeeName.toLowerCase().includes(s) || 
-                  (r.branchName && r.branchName.toLowerCase().includes(s));
-                const matchesType = historyFilterType === 'all' || r.type === historyFilterType;
-                return matchesSearch && matchesType;
-              });
-
-              return (
-                <>
-                  <div className="history-drawer-list">
-                    {filteredList.length === 0 ? (
-                      <div className="history-empty-state">
-                        <Clock size={36} className="history-empty-icon" />
-                        <h4>No logs recorded today</h4>
-                        <p>
-                          {historySearchTerm 
-                            ? 'No matching attendance records found for this search today.' 
-                            : historySelectedStaff
-                            ? `No attendance logs marked yet today for ${historySelectedStaff}.`
-                            : "Today's check-in and check-out logs will show up here in real time."}
-                        </p>
-                      </div>
-                    ) : (
-                      filteredList.map((item) => (
-                        <div 
-                          key={item.id} 
-                          className="history-log-card"
-                          onClick={() => setSelectedRecord({ ...item, disablePhotoZoom: true })}
-                          role="button"
-                          tabIndex={0}
-                          title="Click to view full attendance verification receipt"
-                        >
-                          <div className="history-log-avatar">
-                            {item.photo ? (
-                              <img src={item.photo} alt={item.employeeName} className="history-log-thumb" loading="lazy" decoding="async" width="38" height="38" />
-                            ) : (
-                              <span className="history-log-initial">
-                                {item.employeeName ? item.employeeName.charAt(0).toUpperCase() : 'U'}
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="history-log-main">
-                            {/* Row 1: Employee Name & Action Pill */}
-                            <div className="history-log-header-row">
-                              <strong className="history-log-name">{item.employeeName}</strong>
-                              <div className={`history-action-pill ${item.type === 'in' ? 'pill-in' : 'pill-out'}`}>
-                                {item.type === 'in' ? <LogIn size={11} /> : <LogOut size={11} />}
-                                <span>{item.type === 'in' ? 'Check In' : 'Check Out'}</span>
-                              </div>
-                            </div>
-
-                            {/* Row 2: Branch Name & On-Site Badge */}
-                            {item.branchName && (
-                              <div className="history-log-branch-row">
-                                <span className="history-log-branch-name">
-                                  <MapPin size={11} />
-                                  <span>{item.branchName}</span>
-                                </span>
-                                {item.geofenceVerified && (
-                                  <span className="history-on-site-tag" title="Verified within 50m of branch">
-                                    <ShieldCheck size={11} />
-                                    <span>On-Site{item.distanceMeters != null ? ` (${item.distanceMeters}m)` : ''}</span>
-                                  </span>
-                                )}
-                              </div>
-                            )}
-
-                            {/* Row 3: Punch Time & Date */}
-                            <div className="history-log-meta-row">
-                              <span className="history-log-time-chip">
-                                <Clock size={11} />
-                                <span>{formatTo12HourTime(item.time || item.shortTime)}</span>
-                              </span>
-                              <span className="history-meta-bullet">•</span>
-                              <span className="history-log-date-text">{item.date}</span>
-                            </div>
-                          </div>
-
-                          <ChevronRight size={16} className="history-log-chevron" />
+                    if (filteredCircs.length === 0) {
+                      return (
+                        <div className="history-empty-state">
+                          <Megaphone size={36} className="history-empty-icon" />
+                          <h4>No circulars found</h4>
+                          <p>
+                            {historySearchTerm 
+                              ? 'No circulars match your search query.' 
+                              : 'Official circulars published by Admin common to all staff will show up here.'}
+                          </p>
                         </div>
-                      ))
-                    )}
-                  </div>
+                      );
+                    }
 
-                  {/* Drawer Footer */}
-                  <div className="history-drawer-footer">
-                    <span className="history-footer-count">
-                      {filteredList.length} {historySelectedStaff ? `${historySelectedStaff}'s ` : "today's "}attendance {filteredList.length === 1 ? 'log' : 'logs'}
-                    </span>
-                    <button 
-                      className="history-footer-done-btn"
-                      onClick={() => setShowHistoryDrawer(false)}
-                    >
-                      Close
-                    </button>
-                  </div>
-                </>
-              );
-            })()}
+                    return filteredCircs.map((circ) => (
+                      <div key={circ.id} className="history-circular-card">
+                        <div className="circ-card-top">
+                          <div className="circ-badge-icon">
+                            <Megaphone size={16} />
+                          </div>
+                          <div className="circ-card-meta">
+                            <strong className="circ-card-title">{circ.title}</strong>
+                            <div className="circ-card-subrow">
+                              <span className="circ-admin-pill">Admin Circular</span>
+                              <span className="circ-time-label">{circ.date} • {circ.time}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <p className="circ-card-text">{circ.message}</p>
+                        <div className="circ-card-footer">
+                          <span className="circ-scope-indicator">Common to all staff & branches</span>
+                        </div>
+                      </div>
+                    ));
+                  })()}
+                </div>
+
+                <div className="history-drawer-footer">
+                  <span className="history-footer-count">
+                    {circulars.length} official {circulars.length === 1 ? 'circular' : 'circulars'}
+                  </span>
+                  <button 
+                    className="history-footer-done-btn"
+                    onClick={() => setShowHistoryDrawer(false)}
+                  >
+                    Close
+                  </button>
+                </div>
+              </>
+            ) : (
+              (() => {
+                const staffTarget = historySelectedStaff.trim().toLowerCase();
+                const baseList = historySelectedStaff
+                  ? todayRecords.filter(r => {
+                      const empName = (r.employeeName || r.name || '').trim().toLowerCase();
+                      return empName === staffTarget || empName.includes(staffTarget) || staffTarget.includes(empName);
+                    })
+                  : todayRecords;
+
+                const filteredList = baseList.filter((r) => {
+                  const s = historySearchTerm.toLowerCase();
+                  const matchesSearch = 
+                    !s || 
+                    r.employeeName.toLowerCase().includes(s) || 
+                    (r.branchName && r.branchName.toLowerCase().includes(s));
+                  const matchesType = historyFilterType === 'all' || r.type === historyFilterType;
+                  return matchesSearch && matchesType;
+                });
+
+                return (
+                  <>
+                    <div className="history-drawer-list">
+                      {filteredList.length === 0 ? (
+                        <div className="history-empty-state">
+                          <Clock size={36} className="history-empty-icon" />
+                          <h4>No logs recorded today</h4>
+                          <p>
+                            {historySearchTerm 
+                              ? 'No matching attendance records found for this search today.' 
+                              : historySelectedStaff
+                              ? `No attendance logs marked yet today for ${historySelectedStaff}.`
+                              : "Today's check-in and check-out logs will show up here in real time."}
+                          </p>
+                        </div>
+                      ) : (
+                        filteredList.map((item) => (
+                          <div 
+                            key={item.id} 
+                            className="history-log-card"
+                            onClick={() => setSelectedRecord({ ...item, disablePhotoZoom: true })}
+                            role="button"
+                            tabIndex={0}
+                            title="Click to view full attendance verification receipt"
+                          >
+                            <div className="history-log-avatar">
+                              {item.photo ? (
+                                <img src={item.photo} alt={item.employeeName} className="history-log-thumb" loading="lazy" decoding="async" width="38" height="38" />
+                              ) : (
+                                <span className="history-log-initial">
+                                  {item.employeeName ? item.employeeName.charAt(0).toUpperCase() : 'U'}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="history-log-main">
+                              {/* Row 1: Employee Name & Action Pill */}
+                              <div className="history-log-header-row">
+                                <strong className="history-log-name">{item.employeeName}</strong>
+                                <div className={`history-action-pill ${item.type === 'in' ? 'pill-in' : 'pill-out'}`}>
+                                  {item.type === 'in' ? <LogIn size={11} /> : <LogOut size={11} />}
+                                  <span>{item.type === 'in' ? 'Check In' : 'Check Out'}</span>
+                                </div>
+                              </div>
+
+                              {/* Row 2: Branch Name & On-Site Badge */}
+                              {item.branchName && (
+                                <div className="history-log-branch-row">
+                                  <span className="history-log-branch-name">
+                                    <MapPin size={11} />
+                                    <span>{item.branchName}</span>
+                                  </span>
+                                  {item.geofenceVerified && (
+                                    <span className="history-on-site-tag" title="Verified within 50m of branch">
+                                      <ShieldCheck size={11} />
+                                      <span>On-Site{item.distanceMeters != null ? ` (${item.distanceMeters}m)` : ''}</span>
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Row 3: Punch Time & Date */}
+                              <div className="history-log-meta-row">
+                                <span className="history-log-time-chip">
+                                  <Clock size={11} />
+                                  <span>{formatTo12HourTime(item.time || item.shortTime)}</span>
+                                </span>
+                                <span className="history-meta-bullet">•</span>
+                                <span className="history-log-date-text">{item.date}</span>
+                              </div>
+                            </div>
+
+                            <ChevronRight size={16} className="history-log-chevron" />
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    {/* Drawer Footer */}
+                    <div className="history-drawer-footer">
+                      <span className="history-footer-count">
+                        {filteredList.length} {historySelectedStaff ? `${historySelectedStaff}'s ` : "today's "}attendance {filteredList.length === 1 ? 'log' : 'logs'}
+                      </span>
+                      <button 
+                        className="history-footer-done-btn"
+                        onClick={() => setShowHistoryDrawer(false)}
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </>
+                );
+              })()
+            )}
           </div>
         </div>
       )}

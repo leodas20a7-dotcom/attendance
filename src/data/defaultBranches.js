@@ -143,6 +143,43 @@ export const STORAGE_KEY_SELECTED_BRANCH = 'convenio_selected_branch_id';
 export const STORAGE_KEY_SELECTED_EMP = 'convenio_selected_emp_id';
 export const STORAGE_KEY_ADMIN_LOGS = 'convenio_admin_audit_logs';
 export const STORAGE_KEY_MANAGERS = 'convenio_managers_list';
+export const STORAGE_KEY_CIRCULARS = 'convenio_circulars_v1';
+
+export const DEFAULT_CIRCULARS = [
+  {
+    id: 'circ-default-1',
+    title: 'Daily Attendance & Biometric Policy',
+    message: 'All store staff are requested to ensure timely biometric verification during check-in and check-out at their assigned store.',
+    date: '14 Oct 2026',
+    time: '09:00 AM',
+    timestamp: 1791957600000,
+    sender: 'Admin'
+  }
+];
+
+export function getStoredCirculars() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_CIRCULARS);
+    if (!raw) {
+      localStorage.setItem(STORAGE_KEY_CIRCULARS, JSON.stringify(DEFAULT_CIRCULARS));
+      return DEFAULT_CIRCULARS;
+    }
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+    return DEFAULT_CIRCULARS;
+  } catch (e) {
+    console.error('Error loading circulars:', e);
+    return DEFAULT_CIRCULARS;
+  }
+}
+
+export function saveStoredCirculars(circulars) {
+  try {
+    localStorage.setItem(STORAGE_KEY_CIRCULARS, JSON.stringify(circulars));
+  } catch (e) {
+    console.error('Error saving circulars:', e);
+  }
+}
 
 export const DEFAULT_MANAGERS = [];
 

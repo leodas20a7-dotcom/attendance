@@ -72,6 +72,21 @@ CREATE POLICY "Public full access to attendance_records" ON public.attendance_re
 
 DROP POLICY IF EXISTS "Public full access to managers" ON public.managers;
 CREATE POLICY "Public full access to managers" ON public.managers FOR ALL USING (true) WITH CHECK (true);
+
+-- 5. Circulars Table
+CREATE TABLE IF NOT EXISTS public.circulars (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  date TEXT NOT NULL,
+  time TEXT NOT NULL,
+  sender TEXT DEFAULT 'Admin',
+  created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.circulars ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public full access to circulars" ON public.circulars;
+CREATE POLICY "Public full access to circulars" ON public.circulars FOR ALL USING (true) WITH CHECK (true);
 `;
 
 /**
@@ -355,6 +370,62 @@ export async function removeManagerFromSupabase(managerId) {
     await supabase.from('managers').delete().eq('id', managerId);
   } catch (err) {
     console.warn('Failed to delete manager from Supabase:', err);
+  }
+}
+
+/**
+ * Fetch all circulars from Supabase
+ */
+export async function fetchCircularsFromSupabase() {
+  try {
+    const { data, error } = await supabase
+      .from('circulars')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error || !data) return null;
+
+    return data.map(c => ({
+      id: c.id,
+      title: c.title,
+      message: c.message,
+      date: c.date,
+      time: c.time,
+      sender: c.sender || 'Admin',
+      timestamp: c.created_at ? new Date(c.created_at).getTime() : Date.now()
+    }));
+  } catch (err) {
+    console.warn('Error fetching circulars from Supabase:', err);
+    return null;
+  }
+}
+
+/**
+ * Insert or update a circular in Supabase
+ */
+export async function syncCircularToSupabase(circular) {
+  try {
+    await supabase.from('circulars').upsert({
+      id: circular.id,
+      title: circular.title,
+      message: circular.message,
+      date: circular.date,
+      time: circular.time,
+      sender: circular.sender || 'Admin'
+    });
+  } catch (err) {
+    console.warn('Failed to sync circular to Supabase:', err);
+  }
+}
+
+/**
+ * Delete a circular from Supabase
+ */
+export async function removeCircularFromSupabase(circularId) {
+  try {
+    await supabase.from('circulars').delete().eq('id', circularId);
+  } catch (err) {
+    console.warn('Failed to delete circular from Supabase:', err);
   }
 }
 
