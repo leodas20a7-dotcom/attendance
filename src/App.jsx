@@ -310,8 +310,8 @@ export default function App() {
     return localStorage.getItem(STORAGE_KEY_SELECTED_EMP) || '';
   });
 
-  // Manual fallback name if needed
-  const [customEmployeeName, setCustomEmployeeName] = useState('');
+  // Typed employee name search & disambiguation input
+  const [typedEmpName, setTypedEmpName] = useState('');
   const [formValidationMsg, setFormValidationMsg] = useState('');
 
   // 50-Meter GPS Geofencing & Anti-Proxy Attendance State
@@ -588,10 +588,12 @@ export default function App() {
     const currentBranch = branches.find(b => b.id === selectedBranchId);
     if (currentBranch && currentBranch.employees) {
       const exists = currentBranch.employees.some(e => e.id === selectedEmpId);
-      if (!exists && currentBranch.employees.length > 0) {
-        setSelectedEmpId(currentBranch.employees[0].id);
-      } else if (!exists) {
+      if (!exists) {
         setSelectedEmpId('');
+        setTypedEmpName('');
+      } else if (exists && !typedEmpName) {
+        const found = currentBranch.employees.find(e => e.id === selectedEmpId);
+        if (found) setTypedEmpName(found.name);
       }
     }
   }, [selectedBranchId, branches]);
@@ -704,10 +706,93 @@ export default function App() {
   // Currently active branch on attendance form
   const currentFormBranch = branches.find(b => b.id === selectedBranchId);
   const currentBranchEmployees = currentFormBranch?.employees || [];
-  const currentFormEmployee = currentBranchEmployees.find(e => e.id === selectedEmpId);
 
-  // Active employee name on attendance form
-  const activeFormEmpName = currentFormEmployee ? currentFormEmployee.name : customEmployeeName.trim();
+  // All registered employees across all 8 branches (Master Company Staff Roster)
+  // Allows any company employee to check in at any branch even without prior admin transfer approval
+  const allCompanyEmployees = useMemo(() => {
+    const list = [];
+    branches.forEach(b => {
+      (b.employees || []).forEach(emp => {
+        list.push({
+          ...emp,
+          homeBranchId: b.id,
+          homeBranchName: b.name
+        });
+      });
+    });
+    return list;
+  }, [branches]);
+
+  // Active employee on form: can be from the local branch or visiting/transferred from any other branch
+  const currentFormEmployee = useMemo(() => {
+    if (!selectedEmpId) return null;
+    return allCompanyEmployees.find(e => e.id === selectedEmpId) || null;
+  }, [selectedEmpId, allCompanyEmployees]);
+
+  // Active employee name on attendance form - strictly from verified employee list only
+  const activeFormEmpName = currentFormEmployee ? currentFormEmployee.name : '';
+
+  // Match typed name against official company employee list across all branches
+  // Waits for at least 4 characters before matching
+  const matchedCompanyEmployees = useMemo(() => {
+    const q = typedEmpName.trim().toLowerCase();
+    if (!q || q.length < 4) return [];
+    const cleanQ = q.replace(/[^a-z0-9\s]/g, '');
+    if (!cleanQ || cleanQ.length < 4) return [];
+
+    return allCompanyEmployees.filter(emp => {
+      const rawName = (emp.name || '').toLowerCase();
+      const cleanName = rawName.replace(/[^a-z0-9\s]/g, '');
+      if (cleanName === cleanQ) return true;
+      if (cleanName.startsWith(cleanQ)) return true;
+      if (cleanQ.startsWith(cleanName)) return true;
+      if (cleanName.includes(cleanQ)) return true;
+      const words = cleanName.split(/\s+/);
+      return words.some(w => w.startsWith(cleanQ));
+    });
+  }, [typedEmpName, allCompanyEmployees]);
+
+  // Handler for typing in the name box below dropdown
+  const handleTypedNameChange = (val) => {
+    setTypedEmpName(val);
+    if (formValidationMsg) setFormValidationMsg('');
+    const q = val.trim().toLowerCase();
+    
+    // Wait for at least 4 characters before checking against employee list
+    if (!q || q.length < 4) {
+      setSelectedEmpId('');
+      return;
+    }
+    const cleanQ = q.replace(/[^a-z0-9\s]/g, '');
+    if (!cleanQ || cleanQ.length < 4) {
+      setSelectedEmpId('');
+      return;
+    }
+
+    const matches = allCompanyEmployees.filter(emp => {
+      const rawName = (emp.name || '').toLowerCase();
+      const cleanName = rawName.replace(/[^a-z0-9\s]/g, '');
+      if (cleanName === cleanQ) return true;
+      if (cleanName.startsWith(cleanQ)) return true;
+      if (cleanQ.startsWith(cleanName)) return true;
+      if (cleanName.includes(cleanQ)) return true;
+      const words = cleanName.split(/\s+/);
+      return words.some(w => w.startsWith(cleanQ));
+    });
+
+    if (matches.length === 1) {
+      // Exactly 1 match found in company roster -> auto-select
+      setSelectedEmpId(matches[0].id);
+    } else if (matches.length > 1) {
+      // Duplicate / multiple matches -> user MUST explicitly choose which one
+      if (!matches.some(m => m.id === selectedEmpId)) {
+        setSelectedEmpId('');
+      }
+    } else {
+      // 0 matches found in company roster -> clear selection so invalid names cannot be recorded
+      setSelectedEmpId('');
+    }
+  };
 
   // Helper to reliably check if a record was recorded today across any browser locale / format
   const isRecordToday = useCallback((r) => {
@@ -1602,6 +1687,156 @@ export default function App() {
     }
   }, [calendarStaff, calendarYear, calendarMonth, records, getRecordDateComponents, isMissedCheckoutRecord]);
 
+  // Download Individual Staff Monthly Attendance Report as PDF
+  const handleDownloadStaffMonthlyPDF = () => {
+    if (!calendarStaff || !calendarStaff.name) return;
+
+    const monthName = timesheetMonthNames[calendarMonth];
+    const totalDays = new Date(calendarYear, calendarMonth + 1, 0).getDate();
+
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+
+    // Header Red Bar Branding
+    doc.setFillColor(225, 29, 36);
+    doc.rect(0, 0, 595, 8, 'F');
+
+    // Title & Info
+    doc.setFontSize(18);
+    doc.setTextColor(15, 23, 42);
+    doc.text('Convenio Marts', 36, 38);
+
+    doc.setFontSize(11);
+    doc.setTextColor(225, 29, 36);
+    doc.text('Monthly Staff Attendance Report', 36, 54);
+
+    doc.setFontSize(8.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Generated on: ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} at ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}`, 36, 68);
+
+    // Staff Details Box
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(36, 80, 523, 50, 6, 6, 'F');
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(36, 80, 523, 50, 6, 6, 'D');
+
+    doc.setFontSize(12);
+    doc.setTextColor(15, 23, 42);
+    doc.text(`${calendarStaff.name}`, 48, 100);
+
+    doc.setFontSize(8.5);
+    doc.setTextColor(100, 116, 139);
+    const staffBranch = calendarStaff.branchName || 'Convenio Mart';
+    const staffRole = calendarStaff.role || 'Staff Member';
+    doc.text(`Store: ${staffBranch}    |    Period: ${monthName} ${calendarYear}    |    Role: ${staffRole}`, 48, 116);
+
+    // Compute month totals & daily log rows
+    let presentCount = 0;
+    let leaveCount = 0;
+    let absentCount = 0;
+    let offCount = 0;
+
+    const rows = [];
+    for (let day = 1; day <= totalDays; day++) {
+      const info = getCalendarDayInfo(day);
+      const dateObj = new Date(calendarYear, calendarMonth, day);
+      const dateStr = `${String(day).padStart(2, '0')} ${monthName.slice(0, 3)} ${calendarYear}`;
+      const weekdayStr = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
+
+      let inTime = '-';
+      let outTime = '-';
+      let branch = staffBranch;
+
+      if (info.punches && info.punches.length > 0) {
+        const inPunches = info.punches.filter(p => p.type === 'in');
+        const outPunches = info.punches.filter(p => p.type === 'out');
+        if (inPunches.length > 0) {
+          inTime = formatTo12HourTime(inPunches[0].shortTime || inPunches[0].time);
+          if (inPunches[0].branchName) branch = inPunches[0].branchName;
+        }
+        if (outPunches.length > 0) {
+          const lastOut = outPunches[outPunches.length - 1];
+          outTime = isMissedCheckoutRecord(lastOut) ? 'Missed Out' : formatTo12HourTime(lastOut.shortTime || lastOut.time);
+        }
+      }
+
+      if (info.status === 'present') presentCount++;
+      else if (info.status === 'leave') leaveCount++;
+      else if (info.status === 'absent') absentCount++;
+      else if (info.status === 'off') offCount++;
+
+      rows.push([
+        dateStr,
+        weekdayStr,
+        info.label,
+        inTime,
+        outTime,
+        branch
+      ]);
+    }
+
+    // Mini Summary Stat Badges above table
+    doc.setFontSize(9);
+    doc.setTextColor(21, 128, 61);
+    doc.text(`Present: ${presentCount} Days`, 48, 146);
+    doc.setTextColor(180, 83, 9);
+    doc.text(`Leave / Missed: ${leaveCount} Days`, 160, 146);
+    doc.setTextColor(220, 38, 38);
+    doc.text(`Absent: ${absentCount} Days`, 310, 146);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Weekly Offs: ${offCount} Days`, 425, 146);
+
+    // AutoTable for daily breakdown
+    autoTable(doc, {
+      head: [['Date', 'Day', 'Status', 'Check In', 'Check Out', 'Store / Branch']],
+      body: rows,
+      startY: 156,
+      theme: 'grid',
+      styles: {
+        fontSize: 8,
+        cellPadding: 3.5,
+        halign: 'center',
+        valign: 'middle',
+        textColor: [51, 65, 85],
+        lineColor: [226, 232, 240],
+        lineWidth: 0.5,
+      },
+      headStyles: {
+        fillColor: [241, 245, 249],
+        textColor: [15, 23, 42],
+        fontStyle: 'bold',
+        fontSize: 8,
+        halign: 'center',
+      },
+      columnStyles: {
+        0: { cellWidth: 75, halign: 'center', fontStyle: 'bold' },
+        1: { cellWidth: 45, halign: 'center' },
+        2: { cellWidth: 110, halign: 'center' },
+        3: { cellWidth: 80, halign: 'center' },
+        4: { cellWidth: 85, halign: 'center' },
+        5: { cellWidth: 128, halign: 'left' },
+      },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.column.index === 2) {
+          const val = String(data.cell.raw).toLowerCase();
+          if (val.includes('present')) {
+            data.cell.styles.textColor = [21, 128, 61];
+            data.cell.styles.fontStyle = 'bold';
+          } else if (val.includes('missed') || val.includes('leave')) {
+            data.cell.styles.textColor = [180, 83, 9];
+            data.cell.styles.fontStyle = 'bold';
+          } else if (val.includes('absent')) {
+            data.cell.styles.textColor = [220, 38, 38];
+          } else if (val.includes('off')) {
+            data.cell.styles.textColor = [100, 116, 139];
+          }
+        }
+      }
+    });
+
+    const safeName = calendarStaff.name.replace(/[^a-zA-Z0-9]/g, '_');
+    doc.save(`Attendance_${safeName}_${monthName}_${calendarYear}.pdf`);
+  };
+
   // ================= BRANCH MANAGEMENT HANDLERS =================
   const handleAddBranch = (e) => {
     e.preventDefault();
@@ -1968,11 +2203,21 @@ export default function App() {
       return;
     }
 
-    const empName = currentFormEmployee ? currentFormEmployee.name : customEmployeeName.trim();
-    if (!empName) {
-      setFormValidationMsg('Please select your Employee Name.');
+    if (!currentFormEmployee) {
+      const trimmed = typedEmpName.trim();
+      if (trimmed.length > 0 && trimmed.length < 4) {
+        setFormValidationMsg('Please enter at least 4 characters to verify your name.');
+      } else if (trimmed.length >= 4 && matchedCompanyEmployees.length > 1) {
+        setFormValidationMsg(`Multiple employees match "${trimmed}". Please select which one you are before marking attendance.`);
+      } else if (trimmed.length >= 4) {
+        setFormValidationMsg(`"${trimmed}" is not in our employee list. Only registered Convenio Marts employees can mark attendance.`);
+      } else {
+        setFormValidationMsg('Please select or verify your registered name from our employee list.');
+      }
       return;
     }
+
+    const empName = currentFormEmployee.name;
 
     // Guardrail: Cannot Check Out if not checked in yet
     if (actionType === 'out' && latestTodayRecord?.type !== 'in') {
@@ -2124,7 +2369,13 @@ export default function App() {
     const formattedTime = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
     const shortTime = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 
-    const activeEmpName = currentFormEmployee ? currentFormEmployee.name : (customEmployeeName.trim() || 'Employee');
+    if (!currentFormEmployee) {
+      setFormValidationMsg('Only registered employees in our employee list can record attendance.');
+      setIsProcessing(false);
+      return;
+    }
+
+    const activeEmpName = currentFormEmployee.name;
     const activeBranchName = currentFormBranch ? currentFormBranch.name : 'Main Mart';
     const activeEmpRole = currentFormEmployee?.role || 'Staff';
 
@@ -2626,37 +2877,113 @@ export default function App() {
 
                 {/* Employee Selection */}
                 <div className="clean-field">
-                  <label htmlFor="employee-select" className="clean-label">Employee Name</label>
-                  {currentBranchEmployees.length > 0 ? (
-                    <div className="clean-select-wrapper">
-                      <select
-                        id="employee-select"
-                        className="clean-select"
-                        value={selectedEmpId}
-                        onChange={(e) => {
-                          setSelectedEmpId(e.target.value);
-                          if (formValidationMsg) setFormValidationMsg('');
-                        }}
-                      >
-                        <option value="" disabled>Select Your Name</option>
-                        {currentBranchEmployees.map((emp) => (
-                          <option key={emp.id} value={emp.id}>
-                            {emp.name}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown className="clean-chevron" size={18} />
-                    </div>
-                  ) : (
-                    <input
-                      type="text"
+                  <div className="clean-field-header">
+                    <label htmlFor="employee-select" className="clean-label">Employee Name</label>
+                    <span className="clean-label-hint">Select from roster or type below</span>
+                  </div>
+
+                  {/* 1. Dropdown Selection */}
+                  <div className="clean-select-wrapper">
+                    <select
                       id="employee-select"
-                      placeholder="Enter Employee Name"
-                      value={customEmployeeName}
-                      onChange={(e) => setCustomEmployeeName(e.target.value)}
-                      className="clean-input"
-                    />
-                  )}
+                      className="clean-select"
+                      value={selectedEmpId}
+                      onChange={(e) => {
+                        const newId = e.target.value;
+                        setSelectedEmpId(newId);
+                        const emp = allCompanyEmployees.find(x => x.id === newId);
+                        if (emp) {
+                          setTypedEmpName(emp.name);
+                        }
+                        if (formValidationMsg) setFormValidationMsg('');
+                      }}
+                    >
+                      <option value="" disabled>Select Your Name</option>
+                      {currentBranchEmployees.map((emp) => (
+                        <option key={emp.id} value={emp.id}>
+                          {emp.name}
+                        </option>
+                      ))}
+                      {/* If an employee from another branch is verified, display clean name */}
+                      {currentFormEmployee && !currentBranchEmployees.some(e => e.id === currentFormEmployee.id) && (
+                        <option key={currentFormEmployee.id} value={currentFormEmployee.id}>
+                          {currentFormEmployee.name}
+                        </option>
+                      )}
+                    </select>
+                    <ChevronDown className="clean-chevron" size={18} />
+                  </div>
+
+                  {/* Divider */}
+                  <div className="emp-or-divider">
+                    <span className="emp-or-line"></span>
+                    <span className="emp-or-text">OR TYPE YOUR NAME BELOW</span>
+                    <span className="emp-or-line"></span>
+                  </div>
+
+                  {/* 2. Text Box Below Dropdown */}
+                  <div className="emp-type-container">
+                    <div className="emp-type-input-group">
+                      <Search size={16} className="emp-type-search-icon" />
+                      <input
+                        type="text"
+                        id="employee-name-type-input"
+                        placeholder="Type your name (min 4 letters)..."
+                        value={typedEmpName}
+                        onChange={(e) => handleTypedNameChange(e.target.value)}
+                        className={`clean-input emp-type-input ${
+                          typedEmpName.trim().length >= 4 && matchedCompanyEmployees.length === 0 ? 'input-unmatched' :
+                          currentFormEmployee ? 'input-matched' : ''
+                        }`}
+                        autoComplete="off"
+                      />
+                      {typedEmpName && (
+                        <button
+                          type="button"
+                          className="emp-type-clear-btn"
+                          onClick={() => {
+                            setTypedEmpName('');
+                            setSelectedEmpId('');
+                            if (formValidationMsg) setFormValidationMsg('');
+                          }}
+                          title="Clear input"
+                        >
+                          <X size={15} />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Simple Name Choice (Only when at least 4 characters typed, multiple matches, and not yet selected) */}
+                    {typedEmpName.trim().length >= 4 && matchedCompanyEmployees.length > 1 && !currentFormEmployee && (
+                      <div className="emp-disambiguate-card">
+                        <span className="disambiguate-label">Select your name:</span>
+                        <div className="emp-disambiguate-list">
+                          {matchedCompanyEmployees.map((emp) => (
+                            <button
+                              key={emp.id}
+                              type="button"
+                              className="emp-disambiguate-chip"
+                              onClick={() => {
+                                setSelectedEmpId(emp.id);
+                                setTypedEmpName(emp.name);
+                                if (formValidationMsg) setFormValidationMsg('');
+                              }}
+                            >
+                              <span className="chip-name">{emp.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Not found warning (Only after typing at least 4 characters) */}
+                    {typedEmpName.trim().length >= 4 && matchedCompanyEmployees.length === 0 && (
+                      <div className="emp-verified-tag tag-danger">
+                        <AlertCircle size={15} />
+                        <span>Name not found in employee list</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Smart Status Detection Banner */}
@@ -2706,8 +3033,16 @@ export default function App() {
                     id="btn-check-in"
                     className={`clean-btn clean-btn-in ${latestTodayRecord?.type === 'in' ? 'btn-dimmed-secondary' : ''}`}
                     onClick={() => handleActionClick('in')}
-                    disabled={latestTodayRecord?.type === 'in'}
-                    title={latestTodayRecord?.type === 'in' ? `${activeFormEmpName || 'Employee'} is already checked in today` : 'Record Check In'}
+                    disabled={!currentFormEmployee || latestTodayRecord?.type === 'in'}
+                    title={
+                      !currentFormEmployee
+                        ? (typedEmpName.trim() && matchedCompanyEmployees.length > 1
+                            ? 'Please select which employee you are before checking in'
+                            : 'Select or verify your registered name from employee list to check in')
+                        : latestTodayRecord?.type === 'in'
+                        ? `${activeFormEmpName} is already checked in today`
+                        : 'Record Check In'
+                    }
                   >
                     <LogIn size={18} />
                     <span>Check In</span>
@@ -2720,8 +3055,16 @@ export default function App() {
                     id="btn-check-out"
                     className={`clean-btn clean-btn-out ${latestTodayRecord?.type === 'in' ? 'btn-highlighted-action' : ''}`}
                     onClick={() => handleActionClick('out')}
-                    disabled={latestTodayRecord?.type !== 'in'}
-                    title={latestTodayRecord?.type !== 'in' ? 'Check in required before checking out' : 'Record Check Out'}
+                    disabled={!currentFormEmployee || latestTodayRecord?.type !== 'in'}
+                    title={
+                      !currentFormEmployee
+                        ? (typedEmpName.trim() && matchedCompanyEmployees.length > 1
+                            ? 'Please select which employee you are before checking out'
+                            : 'Select or verify your registered name from employee list to check out')
+                        : latestTodayRecord?.type !== 'in'
+                        ? 'Check in required before checking out'
+                        : 'Record Check Out'
+                    }
                   >
                     <LogOut size={18} />
                     <span>Check Out</span>
@@ -6039,20 +6382,32 @@ export default function App() {
               )}
             </div>
 
-            {/* Bottom Legend */}
+            {/* Bottom Legend & PDF Download */}
             <div className="cal-legend-footer">
-              <div className="cal-legend-item">
-                <span className="legend-box box-present" />
-                <span>Present</span>
+              <div className="cal-legend-items">
+                <div className="cal-legend-item">
+                  <span className="legend-box box-present" />
+                  <span>Present</span>
+                </div>
+                <div className="cal-legend-item">
+                  <span className="legend-box box-leave" />
+                  <span>Leave</span>
+                </div>
+                <div className="cal-legend-item">
+                  <span className="legend-box box-absent" />
+                  <span>Absent</span>
+                </div>
               </div>
-              <div className="cal-legend-item">
-                <span className="legend-box box-leave" />
-                <span>Leave</span>
-              </div>
-              <div className="cal-legend-item">
-                <span className="legend-box box-absent" />
-                <span>Absent</span>
-              </div>
+
+              <button
+                type="button"
+                className="cal-download-btn"
+                onClick={handleDownloadStaffMonthlyPDF}
+                title={`Download ${calendarStaff.name}'s monthly attendance report as PDF`}
+                aria-label="Download Attendance PDF"
+              >
+                <Download size={14} />
+              </button>
             </div>
           </div>
         </div>

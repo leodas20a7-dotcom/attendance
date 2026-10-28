@@ -246,8 +246,10 @@ export function getStoredBranches() {
       return DEFAULT_BRANCHES;
     }
     if (Array.isArray(parsed) && parsed.length > 0) {
+      // Purge any temporary dummy test branches if present in cache
+      const nonDummy = parsed.filter(b => b.id !== 'branch-dummy-test');
       // Merge latest lat/lng and geofence info to keep coordinates updated
-      const updated = parsed.map(branch => {
+      const updated = nonDummy.map(branch => {
         const match = DEFAULT_BRANCHES.find(d => d.id === branch.id || d.name.toLowerCase() === branch.name?.toLowerCase());
         if (match) {
           return {
