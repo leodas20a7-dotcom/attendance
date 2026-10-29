@@ -28,5 +28,21 @@
       "purpose": "maskable"
     }
   ],
+  "shortcuts": [
+    {
+      "name": "Staff Attendance",
+      "short_name": "Attendance",
+      "description": "Mark daily staff attendance",
+      "url": "/",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Manager & Admin Portal",
+      "short_name": "Manager Portal",
+      "description": "Store Manager and Admin login",
+      "url": "/?view=admin",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
   "categories": ["business", "productivity"]
 }

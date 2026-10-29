@@ -716,9 +716,52 @@ export default function App() {
     window.scrollTo(0, 0);
   };
 
-  // Subtle logo click counter (triple click opens admin portal without needing URL bar)
+  // Smart Manager/Admin navigation triggers:
+  // 1. Long-press / Click & Hold (1.3s) on Mobile & Desktop
+  // 2. Right-click context menu on Desktop
+  // 3. Triple-click on logo
+  const [isHoldingLogo, setIsHoldingLogo] = useState(false);
+  const logoHoldTimerRef = useRef(null);
+  const didTriggerHoldRef = useRef(false);
   const logoClickRef = useRef({ count: 0, lastTime: 0 });
+
+  const startLogoHold = (e) => {
+    // Only primary button for mouse (button 0)
+    if (e.type === 'mousedown' && e.button !== 0) return;
+    didTriggerHoldRef.current = false;
+    setIsHoldingLogo(true);
+    if (logoHoldTimerRef.current) clearTimeout(logoHoldTimerRef.current);
+    logoHoldTimerRef.current = setTimeout(() => {
+      didTriggerHoldRef.current = true;
+      setIsHoldingLogo(false);
+      try {
+        if (navigator.vibrate) navigator.vibrate([40, 30, 40]);
+      } catch (err) {}
+      navigateTo('admin');
+    }, 1300);
+  };
+
+  const cancelLogoHold = () => {
+    setIsHoldingLogo(false);
+    if (logoHoldTimerRef.current) {
+      clearTimeout(logoHoldTimerRef.current);
+      logoHoldTimerRef.current = null;
+    }
+  };
+
+  const handleLogoContextMenu = (e) => {
+    e.preventDefault();
+    try {
+      if (navigator.vibrate) navigator.vibrate(30);
+    } catch (err) {}
+    navigateTo('admin');
+  };
+
   const handleLogoClick = () => {
+    if (didTriggerHoldRef.current) {
+      didTriggerHoldRef.current = false;
+      return;
+    }
     const now = Date.now();
     if (now - logoClickRef.current.lastTime < 500) {
       logoClickRef.current.count += 1;
@@ -734,6 +777,20 @@ export default function App() {
       navigateTo('attendance');
     }
   };
+
+  // Keyboard shortcut for Desktop: Ctrl + Shift + A or Alt + L
+  useEffect(() => {
+    const handleGlobalKeyDown = (e) => {
+      const isCtrlShiftA = (e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'A' || e.key === 'a');
+      const isAltL = e.altKey && (e.key === 'L' || e.key === 'l');
+      if (isCtrlShiftA || isAltL) {
+        e.preventDefault();
+        navigateTo(view === 'admin' ? 'attendance' : 'admin');
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [view]);
 
   // Currently active branch on attendance form
   const currentFormBranch = branches.find(b => b.id === selectedBranchId);
@@ -2767,14 +2824,21 @@ export default function App() {
       {/* Top Navbar Header */}
       <header className="header">
         <div 
-          className="logo-container" 
-          onClick={handleLogoClick} 
+          className={`logo-container ${isHoldingLogo ? 'logo-holding' : ''}`}
+          onClick={handleLogoClick}
+          onMouseDown={startLogoHold}
+          onMouseUp={cancelLogoHold}
+          onMouseLeave={cancelLogoHold}
+          onTouchStart={startLogoHold}
+          onTouchEnd={cancelLogoHold}
+          onTouchCancel={cancelLogoHold}
+          onContextMenu={handleLogoContextMenu}
           role="button" 
           tabIndex={0} 
           aria-label="Convenio Mart Home"
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleLogoClick(); }}
-          style={{ cursor: 'pointer' }}
-          title="Convenio Mart"
+          style={{ cursor: 'pointer', userSelect: 'none', WebkitUserSelect: 'none' }}
+          title="Convenio Mart (Hold or Right-Click for Manager Portal)"
         >
           <svg className="logo-svg" role="img" aria-label="Convenio Mart Logo" viewBox="0 0 160 50" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M4 14H18M2 20H15M6 26H17" stroke="#e11d24" strokeWidth="3" strokeLinecap="round"/>
