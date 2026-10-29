@@ -3238,15 +3238,6 @@ export default function App() {
 
             <footer className="portal-footer">
               <span className="footer-copyright">Convenio Marts Attendance</span>
-              <span className="footer-dot">•</span>
-              <button 
-                type="button" 
-                className="footer-admin-link"
-                onClick={handlePurgeCache}
-                title="Wipe local browser cache and reload fresh from database"
-              >
-                Clear Cache
-              </button>
             </footer>
           </div>
         </main>
