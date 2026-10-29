@@ -2,11 +2,14 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import fs from 'fs'
 
-const buildTimePlugin = () => ({
-  name: 'build-time-plugin',
+// Generate a discrete build version string
+const APP_VERSION = 'v_' + Math.floor(Date.now() / 1000);
+
+const buildVersionPlugin = () => ({
+  name: 'build-version-plugin',
   buildStart() {
     const versionData = {
-      buildTime: Date.now(),
+      version: APP_VERSION,
       buildDate: new Date().toISOString()
     };
     try {
@@ -19,27 +22,33 @@ const buildTimePlugin = () => ({
 });
 
 // https://vite.dev/config/
-export default defineConfig({
-  plugins: [react(), buildTimePlugin()],
-  define: {
-    __APP_BUILD_TIME__: Date.now(),
-  },
-  build: {
-    target: 'es2020',
-    minify: 'esbuild',
-    cssMinify: true,
-    cssCodeSplit: true,
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom'],
-          'vendor-supabase': ['@supabase/supabase-js'],
-          'vendor-icons': ['lucide-react'],
+export default defineConfig(({ command }) => {
+  const isDev = command === 'serve';
+  const currentVersion = isDev ? 'dev' : APP_VERSION;
+
+  return {
+    plugins: [react(), !isDev && buildVersionPlugin()].filter(Boolean),
+    define: {
+      __APP_VERSION__: JSON.stringify(currentVersion),
+      __IS_DEV__: isDev,
+    },
+    build: {
+      target: 'es2020',
+      minify: 'esbuild',
+      cssMinify: true,
+      cssCodeSplit: true,
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'vendor-react': ['react', 'react-dom'],
+            'vendor-supabase': ['@supabase/supabase-js'],
+            'vendor-icons': ['lucide-react'],
+          },
         },
       },
     },
-  },
-  css: {
-    postcss: {},
-  },
-})
+    css: {
+      postcss: {},
+    },
+  };
+});

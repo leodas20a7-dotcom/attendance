@@ -106,7 +106,8 @@ import {
   initPwaManager,
   promptPwaInstall,
   applyImmediateUpdate,
-  checkForAppUpdate
+  checkForAppUpdate,
+  dismissUpdateNotification
 } from './lib/pwaManager';
 
 // Helper to format any time string strictly in 12-hour AM/PM format (e.g. "03:05:24 PM")
@@ -2727,16 +2728,29 @@ export default function App() {
             <RefreshCw size={16} className={isUpdatingApp ? "pwa-spin" : ""} />
             <span>A new update has been published! Refresh to apply immediately.</span>
           </div>
-          <button 
-            className="pwa-update-btn"
-            disabled={isUpdatingApp}
-            onClick={() => {
-              setIsUpdatingApp(true);
-              applyImmediateUpdate();
-            }}
-          >
-            {isUpdatingApp ? 'Updating...' : 'Update Now'}
-          </button>
+          <div className="pwa-update-actions">
+            <button 
+              className="pwa-update-btn"
+              disabled={isUpdatingApp}
+              onClick={() => {
+                setIsUpdatingApp(true);
+                applyImmediateUpdate();
+              }}
+            >
+              {isUpdatingApp ? 'Updating...' : 'Update Now'}
+            </button>
+            <button
+              className="pwa-dismiss-btn"
+              onClick={() => {
+                setAppUpdateAvailable(false);
+                dismissUpdateNotification();
+              }}
+              title="Dismiss notification"
+              aria-label="Dismiss notification"
+            >
+              <X size={15} />
+            </button>
+          </div>
         </aside>
       )}
 
