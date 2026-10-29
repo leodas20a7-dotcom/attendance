@@ -107,7 +107,9 @@ import {
   promptPwaInstall,
   applyImmediateUpdate,
   checkForAppUpdate,
-  dismissUpdateNotification
+  dismissUpdateNotification,
+  getDeviceInfo,
+  isAppInstalled
 } from './lib/pwaManager';
 
 // Helper to format any time string strictly in 12-hour AM/PM format (e.g. "03:05:24 PM")
@@ -329,9 +331,17 @@ export default function App() {
   const [geoErrorMsg, setGeoErrorMsg] = useState('');
 
   // PWA & Instant Update States
-  const [canInstallPwa, setCanInstallPwa] = useState(false);
+  const [canInstallPwa, setCanInstallPwa] = useState(() => !isAppInstalled());
   const [appUpdateAvailable, setAppUpdateAvailable] = useState(false);
   const [isUpdatingApp, setIsUpdatingApp] = useState(false);
+  const [showInstallGuideModal, setShowInstallGuideModal] = useState(false);
+
+  const handleInstallClick = async () => {
+    const accepted = await promptPwaInstall();
+    if (!accepted) {
+      setShowInstallGuideModal(true);
+    }
+  };
 
   // Attendance Records
   const [records, setRecords] = useState(() => {
@@ -2786,7 +2796,7 @@ export default function App() {
                 <button 
                   id="admin-install-pwa-btn"
                   className="pwa-install-nav-btn"
-                  onClick={() => promptPwaInstall()}
+                  onClick={handleInstallClick}
                   title="Install Convenio Marts on this device"
                   aria-label="Install App"
                 >
@@ -2834,7 +2844,7 @@ export default function App() {
               <button 
                 id="header-install-pwa-btn"
                 className="pwa-install-nav-btn"
-                onClick={() => promptPwaInstall()}
+                onClick={handleInstallClick}
                 title="Install Convenio Marts on this device"
                 aria-label="Install App"
               >
@@ -6487,6 +6497,116 @@ export default function App() {
                 aria-label="Download Attendance PDF"
               >
                 <Download size={14} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PWA Install Guide Modal */}
+      {showInstallGuideModal && (
+        <div className="modal-overlay" onClick={() => setShowInstallGuideModal(false)}>
+          <div className="modal-content install-guide-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="install-guide-header">
+              <div className="install-guide-logo-wrap">
+                <img src="/icons/icon-192.png" alt="Convenio Marts Logo" className="install-guide-logo-img" />
+              </div>
+              <button 
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setShowInstallGuideModal(false)}
+                aria-label="Close modal"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="install-guide-body">
+              <h3 className="install-guide-title">Install Convenio Marts</h3>
+              <p className="install-guide-desc">
+                Install this app on your device for one-tap attendance and full-screen experience without opening browser tabs.
+              </p>
+
+              {(() => {
+                const info = getDeviceInfo();
+                if (info.isIOS) {
+                  return (
+                    <div className="install-guide-steps">
+                      <div className="install-step-item">
+                        <div className="install-step-num">1</div>
+                        <div className="install-step-text">
+                          Tap the <strong>Share</strong> icon <span className="install-inline-tag">⎋</span> at the bottom of Safari.
+                        </div>
+                      </div>
+                      <div className="install-step-item">
+                        <div className="install-step-num">2</div>
+                        <div className="install-step-text">
+                          Scroll down and tap <strong>Add to Home Screen</strong> <span className="install-inline-tag">➕</span>.
+                        </div>
+                      </div>
+                      <div className="install-step-item">
+                        <div className="install-step-num">3</div>
+                        <div className="install-step-text">
+                          Tap <strong>Add</strong> in the top right to install.
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+                if (info.isAndroid) {
+                  return (
+                    <div className="install-guide-steps">
+                      <div className="install-step-item">
+                        <div className="install-step-num">1</div>
+                        <div className="install-step-text">
+                          Tap the Chrome browser menu <span className="install-inline-tag">⋮</span> at the top right.
+                        </div>
+                      </div>
+                      <div className="install-step-item">
+                        <div className="install-step-num">2</div>
+                        <div className="install-step-text">
+                          Select <strong>"Install app"</strong> or <strong>"Add to Home screen"</strong>.
+                        </div>
+                      </div>
+                      <div className="install-step-item">
+                        <div className="install-step-num">3</div>
+                        <div className="install-step-text">
+                          Tap <strong>Install</strong> to add Convenio Marts to your app drawer and search.
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                  <div className="install-guide-steps">
+                    <div className="install-step-item">
+                      <div className="install-step-num">1</div>
+                      <div className="install-step-text">
+                        Click the <strong>Install icon (⊕)</strong> on the right side of your browser address bar.
+                      </div>
+                    </div>
+                    <div className="install-step-item">
+                      <div className="install-step-num">2</div>
+                      <div className="install-step-text">
+                        Or open browser menu <span className="install-inline-tag">⋮</span> &rarr; select <strong>"Install Convenio Marts"</strong>.
+                      </div>
+                    </div>
+                    <div className="install-step-item">
+                      <div className="install-step-num">3</div>
+                      <div className="install-step-text">
+                        Click <strong>Install</strong> to create a desktop app window and shortcut.
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <button
+                type="button"
+                className="install-guide-confirm-btn"
+                onClick={() => setShowInstallGuideModal(false)}
+              >
+                Got It
               </button>
             </div>
           </div>

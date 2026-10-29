@@ -1,5 +1,5 @@
 // PWA & Smart Update Manager for Convenio Marts
-// Ensures instant deploy reflection without repetitive false alerts
+// Robust installation handler for Android, iOS, and Desktop
 
 let deferredInstallPrompt = null;
 let swRegistration = null;
@@ -14,21 +14,31 @@ const IS_DEV = typeof __IS_DEV__ !== 'undefined'
   ? __IS_DEV__ 
   : (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
+// Check if currently running as an installed standalone app
+export function isAppInstalled() {
+  if (typeof window === 'undefined') return false;
+  return (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    window.navigator.standalone === true ||
+    document.referrer.includes('android-app://')
+  );
+}
+
+// Device detection for smart install instructions
+export function getDeviceInfo() {
+  if (typeof window === 'undefined') return { isIOS: false, isAndroid: false, isDesktop: true };
+  const ua = window.navigator.userAgent || '';
+  const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isAndroid = /Android/.test(ua);
+  const isDesktop = !isIOS && !isAndroid;
+  return { isIOS, isAndroid, isDesktop, hasDirectPrompt: Boolean(deferredInstallPrompt) };
+}
+
 export function initPwaManager({ onUpdateAvailable, onInstallableChange } = {}) {
   if (onUpdateAvailable) updateCallbacks.add(onUpdateAvailable);
   if (onInstallableChange) installCallbacks.add(onInstallableChange);
 
-  // In local development, unregister any lingering service workers to avoid caching dev files
-  if (IS_DEV) {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then((regs) => {
-        regs.forEach((r) => r.unregister());
-      });
-    }
-    return () => {};
-  }
-
-  // 1. Listen for browser install prompt (Android, Chrome, Edge, Desktop)
+  // 1. Always listen for browser native install prompt (Android, Chrome, Edge, Desktop)
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     deferredInstallPrompt = e;
@@ -40,27 +50,23 @@ export function initPwaManager({ onUpdateAvailable, onInstallableChange } = {}) 
     notifyInstallState(false);
   });
 
-  // Check if already running in standalone installed mode
-  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-  if (isStandalone) {
-    notifyInstallState(false);
-  }
+  // Initial installable state: installable if not already running in standalone mode
+  const installed = isAppInstalled();
+  notifyInstallState(!installed);
 
-  // 2. Register Service Worker in production only
-  if ('serviceWorker' in navigator && window.location.protocol === 'https:') {
+  // 2. Register Service Worker in production HTTPS environments
+  if (!IS_DEV && 'serviceWorker' in navigator && window.location.protocol === 'https:') {
     navigator.serviceWorker
       .register('/sw.js')
       .then((reg) => {
         swRegistration = reg;
 
-        // When a genuinely newer service worker is installed
         reg.addEventListener('updatefound', () => {
           const newWorker = reg.installing;
           if (!newWorker) return;
 
           newWorker.addEventListener('statechange', () => {
             if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              // A new service worker has replaced the active one
               markUpdateAvailable();
             }
           });
@@ -71,26 +77,30 @@ export function initPwaManager({ onUpdateAvailable, onInstallableChange } = {}) 
       });
   }
 
-  // 3. Proactive Version Checking against version.json
-  // Initial check after startup
-  setTimeout(() => checkForAppUpdate(), 4000);
+  // 3. Proactive Version Checking against version.json in production
+  if (!IS_DEV) {
+    setTimeout(() => checkForAppUpdate(), 4000);
 
-  // Check on tab visibility change (e.g. unlocking phone or switching back to app)
-  const handleVisibility = () => {
-    if (document.visibilityState === 'visible') {
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        checkForAppUpdate();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    const intervalId = setInterval(() => {
       checkForAppUpdate();
-    }
-  };
-  document.addEventListener('visibilitychange', handleVisibility);
+    }, 180000);
 
-  // Check every 3 minutes
-  const intervalId = setInterval(() => {
-    checkForAppUpdate();
-  }, 180000);
+    return () => {
+      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      if (onUpdateAvailable) updateCallbacks.delete(onUpdateAvailable);
+      if (onInstallableChange) installCallbacks.delete(onInstallableChange);
+    };
+  }
 
   return () => {
-    clearInterval(intervalId);
-    document.removeEventListener('visibilitychange', handleVisibility);
     if (onUpdateAvailable) updateCallbacks.delete(onUpdateAvailable);
     if (onInstallableChange) installCallbacks.delete(onInstallableChange);
   };
@@ -135,7 +145,6 @@ export async function checkForAppUpdate() {
 
     if (response.ok) {
       const data = await response.json();
-      // Only trigger if server version exists, is not 'dev', and is different from CURRENT_APP_VERSION
       if (
         data &&
         data.version &&
@@ -156,19 +165,23 @@ export async function checkForAppUpdate() {
   return false;
 }
 
-// User prompts PWA install
+// Trigger install prompt or signal fallback instructions
 export async function promptPwaInstall() {
-  if (!deferredInstallPrompt) return false;
-  try {
-    deferredInstallPrompt.prompt();
-    const { outcome } = await deferredInstallPrompt.userChoice;
-    deferredInstallPrompt = null;
-    notifyInstallState(false);
-    return outcome === 'accepted';
-  } catch (err) {
-    console.error('PWA install error:', err);
-    return false;
+  if (deferredInstallPrompt) {
+    try {
+      deferredInstallPrompt.prompt();
+      const { outcome } = await deferredInstallPrompt.userChoice;
+      if (outcome === 'accepted') {
+        deferredInstallPrompt = null;
+        notifyInstallState(false);
+      }
+      return outcome === 'accepted';
+    } catch (err) {
+      console.error('PWA install error:', err);
+    }
   }
+  // Return false so caller can display the instruction modal
+  return false;
 }
 
 // Immediate clean update
