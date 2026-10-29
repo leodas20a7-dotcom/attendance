@@ -177,3 +177,4 @@ export async function applyImmediateUpdate() {
   // Force clean reload
   window.location.reload();
 }
+
