@@ -102,6 +102,13 @@ import {
   SUPABASE_SCHEMA_SQL
 } from './lib/supabase';
 
+import {
+  initPwaManager,
+  promptPwaInstall,
+  applyImmediateUpdate,
+  checkForAppUpdate
+} from './lib/pwaManager';
+
 // Helper to format any time string strictly in 12-hour AM/PM format (e.g. "03:05:24 PM")
 export function formatTo12HourTime(timeStr) {
   if (!timeStr) return '';
@@ -319,6 +326,11 @@ export default function App() {
   const [geoStatus, setGeoStatus] = useState('checking');
   const [geoData, setGeoData] = useState(null); // { nearestBranch, distanceMeters, isWithinGeofence, userLat, userLng, accuracy }
   const [geoErrorMsg, setGeoErrorMsg] = useState('');
+
+  // PWA & Instant Update States
+  const [canInstallPwa, setCanInstallPwa] = useState(false);
+  const [appUpdateAvailable, setAppUpdateAvailable] = useState(false);
+  const [isUpdatingApp, setIsUpdatingApp] = useState(false);
 
   // Attendance Records
   const [records, setRecords] = useState(() => {
@@ -671,6 +683,15 @@ export default function App() {
       window.removeEventListener('popstate', handleLocationChange);
       window.removeEventListener('hashchange', handleLocationChange);
     };
+  }, []);
+
+  // Initialize PWA and Smart Deploy Update Detector
+  useEffect(() => {
+    const cleanup = initPwaManager({
+      onUpdateAvailable: () => setAppUpdateAvailable(true),
+      onInstallableChange: (canInstall) => setCanInstallPwa(canInstall)
+    });
+    return cleanup;
   }, []);
 
   const navigateTo = (newView) => {
@@ -2605,8 +2626,9 @@ export default function App() {
     }
   };
 
-  const handlePurgeCache = () => {
+  const handlePurgeCache = async () => {
     if (window.confirm('Clear all local browser cache memory and re-sync freshly from the live database?')) {
+      await applyImmediateUpdate();
       localStorage.clear();
       sessionStorage.clear();
       window.location.reload();
@@ -2698,6 +2720,26 @@ export default function App() {
         </div>
       )}
 
+      {/* Immediate Deploy Update Notification Bar */}
+      {appUpdateAvailable && (
+        <aside className="pwa-update-bar" role="alert" aria-live="assertive">
+          <div className="pwa-update-info">
+            <RefreshCw size={16} className={isUpdatingApp ? "pwa-spin" : ""} />
+            <span>A new update has been published! Refresh to apply immediately.</span>
+          </div>
+          <button 
+            className="pwa-update-btn"
+            disabled={isUpdatingApp}
+            onClick={() => {
+              setIsUpdatingApp(true);
+              applyImmediateUpdate();
+            }}
+          >
+            {isUpdatingApp ? 'Updating...' : 'Update Now'}
+          </button>
+        </aside>
+      )}
+
       {/* Top Navbar Header */}
       <header className="header">
         <div 
@@ -2726,6 +2768,18 @@ export default function App() {
         {view === 'admin' ? (
           <div className="nav-actions">
             <div className="admin-header-nav-actions">
+              {canInstallPwa && (
+                <button 
+                  id="admin-install-pwa-btn"
+                  className="pwa-install-nav-btn"
+                  onClick={() => promptPwaInstall()}
+                  title="Install Convenio Marts on this device"
+                  aria-label="Install App"
+                >
+                  <Download size={14} />
+                  <span>Install App</span>
+                </button>
+              )}
               {isAdminAuthenticated && (
                 <button 
                   id="header-settings-btn"
@@ -2762,6 +2816,18 @@ export default function App() {
           </div>
         ) : (
           <div className="nav-actions">
+            {canInstallPwa && (
+              <button 
+                id="header-install-pwa-btn"
+                className="pwa-install-nav-btn"
+                onClick={() => promptPwaInstall()}
+                title="Install Convenio Marts on this device"
+                aria-label="Install App"
+              >
+                <Download size={14} />
+                <span>Install App</span>
+              </button>
+            )}
             <button
               id="header-history-btn"
               className="history-nav-trigger-btn"

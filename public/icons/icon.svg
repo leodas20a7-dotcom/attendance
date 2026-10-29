@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="convenioGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4f46e5" />
+      <stop offset="100%" stop-color="#7c3aed" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#312e81" flood-opacity="0.35" />
+    </filter>
+  </defs>
+
+  <!-- Background Squircle -->
+  <rect width="512" height="512" rx="112" fill="url(#convenioGrad)" />
+
+  <!-- Inner Soft Accent -->
+  <rect x="24" y="24" width="464" height="464" rx="96" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="4" />
+
+  <!-- Store / Retail Modern Icon -->
+  <g transform="translate(106, 116) scale(12.5)" stroke="#ffffff" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round" filter="url(#shadow)">
+    <!-- Awning / Roof -->
+    <path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7" fill="rgba(255,255,255,0.08)"/>
+    <!-- Store Front Body -->
+    <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" fill="rgba(255,255,255,0.05)"/>
+    <!-- Entrance Door -->
+    <path d="M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4" fill="#ffffff" fill-opacity="0.25"/>
+    <!-- Roof Divider -->
+    <path d="M2 7h20" stroke-width="2.2"/>
+  </g>
+
+  <!-- Small Location / Check Indicator Badge -->
+  <circle cx="396" cy="396" r="54" fill="#10b981" stroke="#ffffff" stroke-width="8" />
+  <path d="M374 396 l16 16 l32 -32" fill="none" stroke="#ffffff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" />
+</svg>
