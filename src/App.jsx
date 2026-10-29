@@ -3554,8 +3554,7 @@ export default function App() {
                 <div className="column-card-title">
                   <Building2 size={18} className="card-icon-navy" />
                   <div>
-                    <h3>Branches & Staff ({branches.length})</h3>
-                    <p className="sub-text">Tap any branch to expand its staff roster and transfer members in-place</p>
+                    <h3>Branches ({branches.length})</h3>
                   </div>
                 </div>
                 {authRole === 'admin' && (
@@ -3639,17 +3638,6 @@ export default function App() {
                         {/* Accordion Expanded Body: Staff Roster In-Place */}
                         {isExpanded && (
                           <div className="branch-accordion-body">
-                            {/* Manager Mode Guidance Banner */}
-                            {authRole === 'manager' && (
-                              <div className="manager-transfer-banner">
-                                <Users size={16} />
-                                <div>
-                                  <strong>Store Manager Transfer Mode:</strong>
-                                  <span> Select staff using checkboxes to bulk transfer or click the transfer icon <ArrowRightLeft size={12} style={{display:'inline', verticalAlign:'middle'}} /> to move staff to another branch.</span>
-                                </div>
-                              </div>
-                            )}
-
                             {/* Clean Add Employee Form (Super Admin Only) */}
                             {authRole === 'admin' && (
                               <form className="add-emp-form-card" onSubmit={handleAddEmployee}>
