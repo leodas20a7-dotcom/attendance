@@ -9394,3 +9394,115 @@ th.th-missed {
     background: rgba(225, 29, 36, 0.12);
   }
 }
+
+/* ================= BRANCH ACCORDION (IN-PLACE MOBILE & DESKTOP) ================= */
+.branches-accordion-container {
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.branches-accordion-topbar {
+  background: #ffffff;
+  border-radius: 16px;
+  border: 1px solid var(--border-light);
+  padding: 1rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: var(--shadow-card);
+}
+
+.branch-accordion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  width: 100%;
+}
+
+.branch-accordion-card {
+  background: #ffffff;
+  border-radius: 14px;
+  border: 1.5px solid #e2e8f0;
+  overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
+}
+
+.branch-accordion-card.is-expanded {
+  border-color: #e11d24;
+  box-shadow: 0 6px 20px rgba(225, 29, 36, 0.09);
+}
+
+.branch-accordion-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1.1rem;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.18s ease;
+  gap: 0.75rem;
+}
+
+.branch-accordion-header:hover {
+  background: #f8fafc;
+}
+
+.branch-accordion-header:active {
+  background: #f1f5f9;
+}
+
+.branch-accordion-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.accordion-chevron-pill {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  transition: background 0.2s ease, color 0.2s ease;
+  flex-shrink: 0;
+}
+
+.branch-accordion-card.is-expanded .accordion-chevron-pill {
+  background: #fee2e2;
+  color: #e11d24;
+}
+
+.accordion-chevron-icon {
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.accordion-chevron-icon.rotated {
+  transform: rotate(180deg);
+}
+
+.branch-accordion-body {
+  padding: 1rem 1.15rem 1.25rem 1.15rem;
+  border-top: 1px solid #f1f5f9;
+  background: #fafbfc;
+  animation: accordionOpen 0.22s ease-out;
+}
+
+@keyframes accordionOpen {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

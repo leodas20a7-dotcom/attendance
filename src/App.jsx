@@ -405,6 +405,12 @@ export default function App() {
     return branchList.length > 0 ? branchList[0].id : '';
   });
 
+  const handleToggleBranchAccordion = (branchId) => {
+    setAdminSelectedBranchId(prev => (prev === branchId ? null : branchId));
+    setSelectedEmpIds([]);
+    setAdminEmpSearch('');
+  };
+
   // Add Branch Form State
   const [showAddBranchModal, setShowAddBranchModal] = useState(false);
   const [newBranchName, setNewBranchName] = useState('');
@@ -3540,45 +3546,56 @@ export default function App() {
               </div>
             </div>
 
-          {/* TAB 1: BRANCH & EMPLOYEE MANAGEMENT */}
+          {/* TAB 1: BRANCH & EMPLOYEE MANAGEMENT (IN-PLACE ACCORDION) */}
           {adminTab === 'branches' && (
-            <div className="branches-management-layout">
-              {/* Left Column: Branches List & Add/Edit */}
-              <div className="branch-column-card">
-                <div className="column-card-header">
-                  <div className="column-card-title">
-                    <Building2 size={18} className="card-icon-navy" />
-                    <div>
-                      <h3>Branches ({branches.length})</h3>
-                    </div>
+            <div className="branches-accordion-container">
+              {/* Top Bar: Title & Add Branch Button */}
+              <div className="branches-accordion-topbar">
+                <div className="column-card-title">
+                  <Building2 size={18} className="card-icon-navy" />
+                  <div>
+                    <h3>Branches & Staff ({branches.length})</h3>
+                    <p className="sub-text">Tap any branch to expand its staff roster and transfer members in-place</p>
                   </div>
-                  {authRole === 'admin' && (
-                    <button 
-                      id="btn-add-branch-open"
-                      className="btn-add-primary"
-                      onClick={() => setShowAddBranchModal(true)}
-                    >
-                      <Plus size={16} />
-                      <span>Add Branch</span>
-                    </button>
-                  )}
                 </div>
+                {authRole === 'admin' && (
+                  <button 
+                    id="btn-add-branch-open"
+                    className="btn-add-primary"
+                    onClick={() => setShowAddBranchModal(true)}
+                  >
+                    <Plus size={16} />
+                    <span>Add Branch</span>
+                  </button>
+                )}
+              </div>
 
-                <div className="branch-cards-list">
-                  {branches.length === 0 ? (
-                    <div className="empty-sub-state">
-                      <Store size={36} color="#cbd5e1" />
-                      <p>No branches configured. Click "Add Branch" above.</p>
-                    </div>
-                  ) : (
-                    branches.map((b) => {
-                      const isSelected = b.id === adminSelectedBranchId;
-                      const empCount = b.employees?.length || 0;
-                      return (
+              {/* Accordion List */}
+              <div className="branch-accordion-list">
+                {branches.length === 0 ? (
+                  <div className="empty-sub-state">
+                    <Store size={36} color="#cbd5e1" />
+                    <p>No branches configured. Click "Add Branch" above.</p>
+                  </div>
+                ) : (
+                  branches.map((b) => {
+                    const isExpanded = b.id === adminSelectedBranchId;
+                    const empCount = b.employees?.length || 0;
+                    const otherBranches = branches.filter(other => other.id !== b.id);
+
+                    return (
+                      <div 
+                        key={b.id} 
+                        className={`branch-accordion-card ${isExpanded ? 'is-expanded' : ''}`}
+                      >
+                        {/* Accordion Header */}
                         <div 
-                          key={b.id} 
-                          className={`branch-item-card ${isSelected ? 'active-branch' : ''}`}
-                          onClick={() => setAdminSelectedBranchId(b.id)}
+                          className="branch-accordion-header"
+                          onClick={() => handleToggleBranchAccordion(b.id)}
+                          role="button"
+                          tabIndex={0}
+                          aria-expanded={isExpanded}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleToggleBranchAccordion(b.id); }}
                         >
                           <div className="branch-item-left">
                             <div className="branch-icon-box">
@@ -3592,10 +3609,11 @@ export default function App() {
                             </div>
                           </div>
 
-                          <div className="branch-item-actions" onClick={(e) => e.stopPropagation()}>
+                          <div className="branch-accordion-header-right">
                             {authRole === 'admin' && (
-                              <>
+                              <div className="branch-item-actions" onClick={(e) => e.stopPropagation()}>
                                 <button 
+                                  type="button"
                                   className="btn-icon-edit"
                                   title="Edit Branch Name"
                                   onClick={() => setEditingBranch(b)}
@@ -3603,242 +3621,227 @@ export default function App() {
                                   <Pencil size={14} />
                                 </button>
                                 <button 
+                                  type="button"
                                   className="btn-icon-delete"
                                   title="Delete Branch"
                                   onClick={() => promptDeleteBranch(b.id)}
                                 >
                                   <Trash2 size={14} />
                                 </button>
-                              </>
+                              </div>
                             )}
+                            <div className="accordion-chevron-pill">
+                              <ChevronDown size={18} className={`accordion-chevron-icon ${isExpanded ? 'rotated' : ''}`} />
+                            </div>
                           </div>
                         </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
 
-              {/* Right Column: Employees for Selected Branch */}
-              <div className="employees-column-card">
-                {currentAdminBranch ? (
-                  <>
-                    <div className="column-card-header">
-                      <div className="column-card-title">
-                        <Users size={18} className="card-icon-red" />
-                        <div>
-                          <h3>{currentAdminBranch.name}</h3>
-                          <p className="sub-text">
-                            {currentAdminBranch.employees?.length || 0} registered staff members
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Manager Mode Guidance Banner */}
-                    {authRole === 'manager' && (
-                      <div className="manager-transfer-banner">
-                        <Users size={16} />
-                        <div>
-                          <strong>Store Manager Transfer Mode:</strong>
-                          <span> Select staff using checkboxes to bulk transfer or click the transfer icon <ArrowRightLeft size={12} style={{display:'inline', verticalAlign:'middle'}} /> to move staff to another branch.</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Clean Add Employee Form (Super Admin Only) */}
-                    {authRole === 'admin' && (
-                      <form className="add-emp-form-card" onSubmit={handleAddEmployee}>
-                        <div className="add-emp-inputs-row">
-                          <div className="input-group-grow">
-                            <input 
-                              id="new-emp-name-input"
-                              type="text" 
-                              required 
-                              placeholder="Add employee name (e.g. Ramesh Kumar)" 
-                              value={newEmpName}
-                              onChange={(e) => setNewEmpName(e.target.value)}
-                            />
-                          </div>
-                          <button 
-                            id="btn-add-emp-submit"
-                            type="submit" 
-                            className="btn-add-emp"
-                          >
-                            <Plus size={16} />
-                            <span>Add Staff</span>
-                          </button>
-                        </div>
-                      </form>
-                    )}
-
-                    {/* Employee Roster Search */}
-                    {currentAdminBranch.employees?.length > 3 && (
-                      <div className="emp-search-row">
-                        <Search size={15} color="#94a3b8" />
-                        <input 
-                          type="text" 
-                          placeholder="Filter employees in this branch..."
-                          value={adminEmpSearch}
-                          onChange={(e) => setAdminEmpSearch(e.target.value)}
-                        />
-                        {adminEmpSearch && (
-                          <button className="clear-search-btn" onClick={() => setAdminEmpSearch('')}>
-                            <X size={13} />
-                          </button>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Employees List */}
-                    <div className="employee-roster-list">
-                      {!currentAdminBranch.employees || currentAdminBranch.employees.length === 0 ? (
-                        <div className="empty-sub-state">
-                          <Users size={36} color="#cbd5e1" />
-                          <p>No employees added for this branch yet.</p>
-                          <span className="sub-helper">Use the form above to add staff members who work here.</span>
-                        </div>
-                      ) : (
-                        currentAdminBranch.employees
-                          .filter(emp => !adminEmpSearch || emp.name.toLowerCase().includes(adminEmpSearch.toLowerCase()) || (emp.role && emp.role.toLowerCase().includes(adminEmpSearch.toLowerCase())))
-                          .map((emp) => {
-                            const isChecked = selectedEmpIds.includes(emp.id);
-                            const otherBranches = branches.filter(b => b.id !== currentAdminBranch.id);
-
-                            return (
-                              <div key={emp.id} className={`employee-roster-item ${isChecked ? 'emp-item-selected' : ''}`}>
-                                <div className="emp-item-left">
-                                  <button 
-                                    type="button"
-                                    className={`emp-checkbox-btn ${isChecked ? 'is-checked' : ''}`}
-                                    onClick={() => {
-                                      setSelectedEmpIds(prev => 
-                                        prev.includes(emp.id) ? prev.filter(id => id !== emp.id) : [...prev, emp.id]
-                                      );
-                                    }}
-                                    title={isChecked ? 'Deselect staff' : 'Select for bulk transfer'}
-                                  >
-                                    {isChecked ? <CheckSquare size={17} className="check-icon-active" /> : <Square size={17} className="check-icon-idle" />}
-                                  </button>
-
-                                  <div className="emp-avatar-bubble">
-                                    {emp.name.charAt(0).toUpperCase()}
-                                  </div>
-                                  <div className="emp-item-info">
-                                    <div className="emp-name-row">
-                                      <strong className="emp-item-name">{emp.name}</strong>
-                                      {emp.lastTransferredBy && (
-                                        <span 
-                                          className="emp-transferred-tag" 
-                                          title={`Transferred by ${emp.lastTransferredBy}${emp.lastTransferredAt ? ' on ' + new Date(emp.lastTransferredAt).toLocaleDateString() : ''}`}
-                                        >
-                                          Moved by {emp.lastTransferredBy}
-                                        </span>
-                                      )}
-                                    </div>
-                                    {emp.role && <span className="emp-item-role">{emp.role}</span>}
-                                  </div>
-                                </div>
-
-                                <div className="emp-item-actions">
-                                  {/* Transfer is available to both Managers and Admin */}
-                                  <button 
-                                    type="button"
-                                    className="btn-icon-transfer"
-                                    title="Transfer to Another Branch"
-                                    onClick={() => setTransferModalStaff({
-                                      emp,
-                                      fromBranchId: currentAdminBranch.id,
-                                      toBranchId: otherBranches[0]?.id || ''
-                                    })}
-                                  >
-                                    <ArrowRightLeft size={14} />
-                                  </button>
-
-                                  {/* Edit and Delete are Super Admin Only */}
-                                  {authRole === 'admin' && (
-                                    <>
-                                      <button 
-                                        type="button"
-                                        className="btn-icon-edit"
-                                        title="Edit Employee & Branch"
-                                        onClick={() => setEditingEmp({
-                                          branchId: currentAdminBranch.id,
-                                          empId: emp.id,
-                                          name: emp.name,
-                                          role: emp.role || '',
-                                          targetBranchId: currentAdminBranch.id
-                                        })}
-                                      >
-                                        <Pencil size={14} />
-                                      </button>
-                                      <button 
-                                        type="button"
-                                        className="btn-icon-delete"
-                                        title="Remove Employee"
-                                        onClick={() => promptDeleteEmployee(currentAdminBranch.id, emp)}
-                                      >
-                                        <Trash2 size={14} />
-                                      </button>
-                                    </>
-                                  )}
+                        {/* Accordion Expanded Body: Staff Roster In-Place */}
+                        {isExpanded && (
+                          <div className="branch-accordion-body">
+                            {/* Manager Mode Guidance Banner */}
+                            {authRole === 'manager' && (
+                              <div className="manager-transfer-banner">
+                                <Users size={16} />
+                                <div>
+                                  <strong>Store Manager Transfer Mode:</strong>
+                                  <span> Select staff using checkboxes to bulk transfer or click the transfer icon <ArrowRightLeft size={12} style={{display:'inline', verticalAlign:'middle'}} /> to move staff to another branch.</span>
                                 </div>
                               </div>
-                            );
-                          })
-                      )}
-                    </div>
+                            )}
 
-                    {/* Bulk Selection Floating Action Bar */}
-                    {selectedEmpIds.length > 0 && (
-                      <div className="bulk-transfer-dock">
-                        <div className="bulk-dock-left">
-                          <span className="bulk-badge">
-                            <Users size={14} />
-                            <strong>{selectedEmpIds.length}</strong> {selectedEmpIds.length === 1 ? 'staff member' : 'staff members'} selected
-                          </span>
-                          <button 
-                            type="button"
-                            className="btn-bulk-cancel"
-                            onClick={() => setSelectedEmpIds([])}
-                          >
-                            Deselect
-                          </button>
-                        </div>
+                            {/* Clean Add Employee Form (Super Admin Only) */}
+                            {authRole === 'admin' && (
+                              <form className="add-emp-form-card" onSubmit={handleAddEmployee}>
+                                <div className="add-emp-inputs-row">
+                                  <div className="input-group-grow">
+                                    <input 
+                                      id="new-emp-name-input"
+                                      type="text" 
+                                      required 
+                                      placeholder="Add employee name (e.g. Ramesh Kumar)" 
+                                      value={newEmpName}
+                                      onChange={(e) => setNewEmpName(e.target.value)}
+                                    />
+                                  </div>
+                                  <button 
+                                    id="btn-add-emp-submit"
+                                    type="submit" 
+                                    className="btn-add-emp"
+                                  >
+                                    <Plus size={16} />
+                                    <span>Add Staff</span>
+                                  </button>
+                                </div>
+                              </form>
+                            )}
 
-                        <div className="bulk-dock-right">
-                          <span className="dock-prompt">Move to:</span>
-                          <select 
-                            className="bulk-branch-select"
-                            value={bulkTargetBranchId}
-                            onChange={(e) => setBulkTargetBranchId(e.target.value)}
-                          >
-                            <option value="">-- Choose destination branch --</option>
-                            {branches
-                              .filter(b => b.id !== currentAdminBranch.id)
-                              .map(b => (
-                                <option key={b.id} value={b.id}>
-                                  {b.name} ({b.employees?.length || 0} staff)
-                                </option>
-                              ))}
-                          </select>
-                          <button 
-                            type="button"
-                            className="btn-bulk-execute"
-                            disabled={!bulkTargetBranchId}
-                            onClick={() => handleTransferEmployees(selectedEmpIds, currentAdminBranch.id, bulkTargetBranchId)}
-                          >
-                            <ArrowRightLeft size={15} />
-                            <span>Transfer Now</span>
-                          </button>
-                        </div>
+                            {/* Employee Roster Search */}
+                            {b.employees?.length > 3 && (
+                              <div className="emp-search-row">
+                                <Search size={15} color="#94a3b8" />
+                                <input 
+                                  type="text" 
+                                  placeholder={`Filter staff in ${b.name}...`}
+                                  value={adminEmpSearch}
+                                  onChange={(e) => setAdminEmpSearch(e.target.value)}
+                                />
+                                {adminEmpSearch && (
+                                  <button className="clear-search-btn" onClick={() => setAdminEmpSearch('')}>
+                                    <X size={13} />
+                                  </button>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Employees List */}
+                            <div className="employee-roster-list">
+                              {!b.employees || b.employees.length === 0 ? (
+                                <div className="empty-sub-state">
+                                  <Users size={32} color="#cbd5e1" />
+                                  <p>No employees added for {b.name} yet.</p>
+                                  {authRole === 'admin' && (
+                                    <span className="sub-helper">Use the form above to add staff members who work here.</span>
+                                  )}
+                                </div>
+                              ) : (
+                                b.employees
+                                  .filter(emp => !adminEmpSearch || emp.name.toLowerCase().includes(adminEmpSearch.toLowerCase()) || (emp.role && emp.role.toLowerCase().includes(adminEmpSearch.toLowerCase())))
+                                  .map((emp) => {
+                                    const isChecked = selectedEmpIds.includes(emp.id);
+
+                                    return (
+                                      <div key={emp.id} className={`employee-roster-item ${isChecked ? 'emp-item-selected' : ''}`}>
+                                        <div className="emp-item-left">
+                                          <button 
+                                            type="button"
+                                            className={`emp-checkbox-btn ${isChecked ? 'is-checked' : ''}`}
+                                            onClick={() => {
+                                              setSelectedEmpIds(prev => 
+                                                prev.includes(emp.id) ? prev.filter(id => id !== emp.id) : [...prev, emp.id]
+                                              );
+                                            }}
+                                            title={isChecked ? 'Deselect staff' : 'Select for bulk transfer'}
+                                          >
+                                            {isChecked ? <CheckSquare size={17} className="check-icon-active" /> : <Square size={17} className="check-icon-idle" />}
+                                          </button>
+
+                                          <div className="emp-avatar-bubble">
+                                            {emp.name.charAt(0).toUpperCase()}
+                                          </div>
+                                          <div className="emp-item-info">
+                                            <div className="emp-name-row">
+                                              <strong className="emp-item-name">{emp.name}</strong>
+                                              {emp.lastTransferredBy && (
+                                                <span 
+                                                  className="emp-transferred-tag" 
+                                                  title={`Transferred by ${emp.lastTransferredBy}${emp.lastTransferredAt ? ' on ' + new Date(emp.lastTransferredAt).toLocaleDateString() : ''}`}
+                                                >
+                                                  Moved by {emp.lastTransferredBy}
+                                                </span>
+                                              )}
+                                            </div>
+                                            {emp.role && <span className="emp-item-role">{emp.role}</span>}
+                                          </div>
+                                        </div>
+
+                                        <div className="emp-item-actions">
+                                          {/* Transfer is available to both Managers and Admin */}
+                                          <button 
+                                            type="button"
+                                            className="btn-icon-transfer"
+                                            title="Transfer to Another Branch"
+                                            onClick={() => setTransferModalStaff({
+                                              emp,
+                                              fromBranchId: b.id,
+                                              toBranchId: otherBranches[0]?.id || ''
+                                            })}
+                                          >
+                                            <ArrowRightLeft size={14} />
+                                          </button>
+
+                                          {/* Edit and Delete are Super Admin Only */}
+                                          {authRole === 'admin' && (
+                                            <>
+                                              <button 
+                                                type="button"
+                                                className="btn-icon-edit"
+                                                title="Edit Employee & Branch"
+                                                onClick={() => setEditingEmp({
+                                                  branchId: b.id,
+                                                  empId: emp.id,
+                                                  name: emp.name,
+                                                  role: emp.role || '',
+                                                  targetBranchId: b.id
+                                                })}
+                                              >
+                                                <Pencil size={14} />
+                                              </button>
+                                              <button 
+                                                type="button"
+                                                className="btn-icon-delete"
+                                                title="Remove Employee"
+                                                onClick={() => promptDeleteEmployee(b.id, emp)}
+                                              >
+                                                <Trash2 size={14} />
+                                              </button>
+                                            </>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })
+                              )}
+                            </div>
+
+                            {/* Bulk Selection Floating Action Bar */}
+                            {selectedEmpIds.length > 0 && (
+                              <div className="bulk-transfer-dock">
+                                <div className="bulk-dock-left">
+                                  <span className="bulk-badge">
+                                    <Users size={14} />
+                                    <strong>{selectedEmpIds.length}</strong> {selectedEmpIds.length === 1 ? 'staff member' : 'staff members'} selected
+                                  </span>
+                                  <button 
+                                    type="button"
+                                    className="btn-bulk-cancel"
+                                    onClick={() => setSelectedEmpIds([])}
+                                  >
+                                    Deselect
+                                  </button>
+                                </div>
+
+                                <div className="bulk-dock-right">
+                                  <span className="dock-prompt">Move to:</span>
+                                  <select 
+                                    className="bulk-branch-select"
+                                    value={bulkTargetBranchId}
+                                    onChange={(e) => setBulkTargetBranchId(e.target.value)}
+                                  >
+                                    <option value="">-- Choose destination branch --</option>
+                                    {otherBranches.map(otherB => (
+                                      <option key={otherB.id} value={otherB.id}>
+                                        {otherB.name} ({otherB.employees?.length || 0} staff)
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <button 
+                                    type="button"
+                                    className="btn-bulk-execute"
+                                    disabled={!bulkTargetBranchId}
+                                    onClick={() => handleTransferEmployees(selectedEmpIds, b.id, bulkTargetBranchId)}
+                                  >
+                                    <ArrowRightLeft size={15} />
+                                    <span>Transfer Now</span>
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="empty-sub-state">
-                    <p>Select a branch to manage its employees.</p>
-                  </div>
+                    );
+                  })
                 )}
               </div>
             </div>
