@@ -54,9 +54,9 @@ export const DEFAULT_BRANCHES = [
     location: 'Thaiyur',
     pincode: '603103',
     address: "Advaita Blossoms, #2/421, Market Road, Thaiyur Market Rd, A' Village, Kelambakkam, Tamil Nadu 603103",
-    lat: 12.784405,
-    lng: 80.211283,
-    geofenceRadiusMeters: 50,
+    lat: 12.784409,
+    lng: 80.211263,
+    geofenceRadiusMeters: 60,
     employees: [
       { id: 'emp-blossom-1', name: 'Sathish' }
     ]
