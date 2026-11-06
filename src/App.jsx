@@ -896,6 +896,50 @@ export default function App() {
     }
   };
 
+  // Helper to parse calendar date string (e.g. 'Nov 6, 2026', '6 Nov 2026', '2026-11-06')
+  const parseCalendarDate = useCallback((dateStr) => {
+    if (!dateStr) return null;
+    const str = String(dateStr).trim();
+
+    // Check ISO format YYYY-MM-DD
+    const isoMatch = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (isoMatch) {
+      return {
+        year: parseInt(isoMatch[1], 10),
+        month: parseInt(isoMatch[2], 10) - 1,
+        day: parseInt(isoMatch[3], 10)
+      };
+    }
+
+    const tokens = str.match(/\b([a-zA-Z]+|\d+)\b/g);
+    if (!tokens || tokens.length < 3) return null;
+
+    const monthMap = {
+      jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+      jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+    };
+
+    let day = null, month = null, year = null;
+    for (const tok of tokens) {
+      const lower = tok.toLowerCase();
+      if (monthMap[lower.slice(0, 3)] !== undefined && month === null) {
+        month = monthMap[lower.slice(0, 3)];
+      } else if (/^\d{4}$/.test(tok) && year === null) {
+        year = parseInt(tok, 10);
+      } else if (/^\d{1,2}$/.test(tok) && day === null) {
+        const num = parseInt(tok, 10);
+        if (num >= 1 && num <= 31) {
+          day = num;
+        }
+      }
+    }
+
+    if (year !== null && month !== null && day !== null) {
+      return { year, month, day };
+    }
+    return null;
+  }, []);
+
   // Helper to reliably check if a record was recorded today across any browser locale / format
   const isRecordToday = useCallback((r) => {
     if (!r) return false;
@@ -904,7 +948,16 @@ export default function App() {
     const curMonth = now.getMonth();
     const curDate = now.getDate();
 
-    // 1. Try explicit numeric timestamp
+    // 1. PRIMARY SOURCE OF TRUTH: Calendar date string (r.date)
+    // Never let an automated background process created_at timestamp override the explicit shift date!
+    if (r.date) {
+      const parsed = parseCalendarDate(r.date);
+      if (parsed) {
+        return parsed.year === curYear && parsed.month === curMonth && parsed.day === curDate;
+      }
+    }
+
+    // 2. Explicit numeric timestamp (if no explicit date string)
     if (r.timestamp && !isNaN(Number(r.timestamp))) {
       const d = new Date(Number(r.timestamp));
       if (!isNaN(d.getTime())) {
@@ -912,8 +965,8 @@ export default function App() {
       }
     }
 
-    // 2. Try parsing numeric timestamp from ID (e.g. REC-1791438659468)
-    if (r.id && typeof r.id === 'string' && r.id.startsWith('REC-')) {
+    // 3. REC-ID timestamp (e.g. REC-1793941915032, ignoring auto-generated records without numeric timestamps)
+    if (r.id && typeof r.id === 'string' && r.id.startsWith('REC-') && !r.id.startsWith('REC-AUTO')) {
       const idSub = r.id.slice(4);
       if (!isNaN(Number(idSub))) {
         const ts = Number(idSub);
@@ -926,55 +979,16 @@ export default function App() {
       }
     }
 
-    // 3. Try created_at (Supabase ISO timestamp)
-    if (r.created_at) {
+    // 4. created_at fallback only if not an auto-generated checkout
+    if (r.created_at && !r.id?.startsWith('REC-AUTO') && !r.isAutoCheckout) {
       const d = new Date(r.created_at);
       if (!isNaN(d.getTime())) {
         return d.getFullYear() === curYear && d.getMonth() === curMonth && d.getDate() === curDate;
       }
     }
 
-    // 4. Try parsing r.date safely
-    if (r.date) {
-      const d = new Date(r.date);
-      if (!isNaN(d.getTime())) {
-        return d.getFullYear() === curYear && d.getMonth() === curMonth && d.getDate() === curDate;
-      }
-
-      // 5. Robust word/number token parsing (prevents matching "6" inside year "2026")
-      const dateStr = String(r.date).trim();
-      const tokens = dateStr.match(/\b([a-zA-Z]+|\d+)\b/g);
-      if (tokens && tokens.length >= 3) {
-        let parsedDay = null;
-        let parsedMonth = null;
-        let parsedYear = null;
-        const monthMap = {
-          jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
-          jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
-        };
-
-        tokens.forEach(tok => {
-          const lower = tok.toLowerCase();
-          if (monthMap[lower.slice(0, 3)] !== undefined) {
-            parsedMonth = monthMap[lower.slice(0, 3)];
-          } else if (/^\d{4}$/.test(tok)) {
-            parsedYear = parseInt(tok, 10);
-          } else if (/^\d{1,2}$/.test(tok)) {
-            const num = parseInt(tok, 10);
-            if (num >= 1 && num <= 31 && parsedDay === null) {
-              parsedDay = num;
-            }
-          }
-        });
-
-        if (parsedYear === curYear && parsedMonth === curMonth && parsedDay === curDate) {
-          return true;
-        }
-      }
-    }
-
     return false;
-  }, []);
+  }, [parseCalendarDate]);
 
   // Helper to check if a record is marked as a missed checkout
   const isMissedCheckoutRecord = useCallback((r) => {
@@ -1030,6 +1044,7 @@ export default function App() {
             const autoRecord = {
               id: autoId,
               timestamp: (lastPunch.timestamp || Date.now()) + 3600000,
+              created_at: new Date(lastPunch.date || date).toISOString(),
               employeeName: empName,
               employeeRole: lastPunch.employeeRole || 'Staff',
               branchName: lastPunch.branchName || 'Convenio Mart',
@@ -1097,9 +1112,22 @@ export default function App() {
 
     // Guaranteed chronological sort descending (newest punch at index 0)
     empTodayRecs.sort((a, b) => {
-      const tsA = a.timestamp || (a.created_at ? new Date(a.created_at).getTime() : 0) || (a.id && a.id.startsWith('REC-') ? Number(a.id.slice(4)) || 0 : 0);
-      const tsB = b.timestamp || (b.created_at ? new Date(b.created_at).getTime() : 0) || (b.id && b.id.startsWith('REC-') ? Number(b.id.slice(4)) || 0 : 0);
-      return tsB - tsA;
+      const getExactPunchTime = (rec) => {
+        // Priority 1: id with epoch millis (e.g. REC-1793941915032)
+        if (rec.id && rec.id.startsWith('REC-') && !rec.id.startsWith('REC-AUTO')) {
+          const num = Number(rec.id.slice(4));
+          if (!isNaN(num) && num > 1600000000000) return num;
+        }
+        // Priority 2: explicit numeric timestamp
+        if (rec.timestamp && !isNaN(Number(rec.timestamp))) return Number(rec.timestamp);
+        // Priority 3: created_at (if not auto-generated)
+        if (rec.created_at && !rec.id?.startsWith('REC-AUTO')) {
+          const t = new Date(rec.created_at).getTime();
+          if (!isNaN(t)) return t;
+        }
+        return 0;
+      };
+      return getExactPunchTime(b) - getExactPunchTime(a);
     });
 
     return empTodayRecs[0];
