@@ -316,6 +316,7 @@ export async function saveAttendanceToSupabase(record) {
   try {
     const { error } = await supabase.from('attendance_records').insert({
       id: record.id,
+      created_at: record.created_at || new Date().toISOString(),
       employee_name: record.employeeName,
       employee_role: record.employeeRole || '',
       branch_name: record.branchName,

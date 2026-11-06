@@ -1074,14 +1074,24 @@ export default function App() {
   }, [records, isRecordToday]);
 
   // Smart Status Detection: Find latest attendance record for this employee today
-  const latestTodayRecord = activeFormEmpName 
-    ? records.find(r => {
-        const empName = (r.employeeName || r.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
-        const targetName = activeFormEmpName.trim().toLowerCase().replace(/\s+/g, ' ');
-        const matchesEmp = empName === targetName;
-        return matchesEmp && isRecordToday(r);
-      })
-    : null;
+  const latestTodayRecord = useMemo(() => {
+    if (!activeFormEmpName) return null;
+    const targetName = activeFormEmpName.trim().toLowerCase().replace(/\s+/g, ' ');
+    const empTodayRecs = records.filter(r => {
+      const empName = (r.employeeName || r.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      return empName === targetName && isRecordToday(r);
+    });
+    if (empTodayRecs.length === 0) return null;
+
+    // Guaranteed chronological sort descending (newest punch at index 0)
+    empTodayRecs.sort((a, b) => {
+      const tsA = a.timestamp || (a.created_at ? new Date(a.created_at).getTime() : 0) || (a.id && a.id.startsWith('REC-') ? Number(a.id.slice(4)) || 0 : 0);
+      const tsB = b.timestamp || (b.created_at ? new Date(b.created_at).getTime() : 0) || (b.id && b.id.startsWith('REC-') ? Number(b.id.slice(4)) || 0 : 0);
+      return tsB - tsA;
+    });
+
+    return empTodayRecs[0];
+  }, [activeFormEmpName, records, isRecordToday]);
 
   // All today's attendance records across all staff
   const todayRecords = useMemo(() => {
