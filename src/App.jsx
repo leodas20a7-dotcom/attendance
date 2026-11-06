@@ -112,6 +112,14 @@ import {
   isAppInstalled
 } from './lib/pwaManager';
 
+import {
+  initServerTime,
+  getServerNow,
+  getServerTimestamp,
+  isServerTimeSynced,
+  getClockOffset
+} from './lib/serverTime';
+
 // Helper to format any time string strictly in 12-hour AM/PM format (e.g. "03:05:24 PM")
 export function formatTo12HourTime(timeStr) {
   if (!timeStr) return '';
@@ -464,9 +472,9 @@ export default function App() {
   const [adminLogCategoryFilter, setAdminLogCategoryFilter] = useState('all');
 
   const logAdminAction = (category, title, details = {}) => {
-    const now = new Date();
+    const now = getServerNow();
     const newLog = {
-      id: 'act-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
+      id: 'act-' + now.getTime() + '-' + Math.random().toString(36).substr(2, 4),
       timestamp: now.toISOString(),
       dateStr: now.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
       timeStr: now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }),
@@ -521,6 +529,9 @@ export default function App() {
     async function initSupabase() {
       setIsSyncing(true);
       try {
+        // Sync server time first (anti-tampering: prevents fake phone clock punches)
+        await initServerTime();
+
         const status = await checkSupabaseStatus();
         setSupabaseStatus(status);
 
@@ -974,7 +985,8 @@ export default function App() {
   const checkAndApplyMissedCheckouts = useCallback((currentRecords) => {
     if (!Array.isArray(currentRecords) || currentRecords.length === 0) return currentRecords;
 
-    const now = new Date();
+    // Use server-authoritative time for auto-checkout evaluation
+    const now = getServerNow();
     // After 11:30 PM check (23:30 or later)
     const isPast1130PMToday = now.getHours() > 23 || (now.getHours() === 23 && now.getMinutes() >= 30);
 
@@ -1290,17 +1302,17 @@ export default function App() {
     }
     if (!newCircularTitle.trim() || !newCircularMessage.trim()) return;
 
-    const now = new Date();
+    const now = getServerNow();
     const dateStr = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 
     const newCirc = {
-      id: `circ-${Date.now()}`,
+      id: `circ-${now.getTime()}`,
       title: newCircularTitle.trim(),
       message: newCircularMessage.trim(),
       date: dateStr,
       time: timeStr,
-      timestamp: Date.now(),
+      timestamp: now.getTime(),
       sender: 'Admin'
     };
 
@@ -2489,7 +2501,8 @@ export default function App() {
     // Safeguard: compress photo before storing in state, localStorage, or Supabase
     const finalPhoto = await compressImageDataUrl(capturedPhoto, 480, 0.72);
 
-    const now = new Date();
+    // Use server-authoritative time (prevents phone clock tampering)
+    const now = getServerNow();
     const formattedDate = now.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
     const formattedTime = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
     const shortTime = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
@@ -2509,7 +2522,7 @@ export default function App() {
       const verifiedDistance = geoData?.distanceMeters != null ? geoData.distanceMeters : null;
 
       const newRecord = {
-        id: 'REC-' + Date.now(),
+        id: 'REC-' + now.getTime(),
         timestamp: now.getTime(),
         created_at: now.toISOString(),
         employeeName: activeEmpName,
