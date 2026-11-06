@@ -612,20 +612,16 @@ export default function App() {
     }
   }, [selectedEmpId]);
 
-  // If selected branch changes and current selected employee is not in it, update selected employee
+  // If selected employee is deleted from all company branches, reset selection
   useEffect(() => {
-    const currentBranch = branches.find(b => b.id === selectedBranchId);
-    if (currentBranch && currentBranch.employees) {
-      const exists = currentBranch.employees.some(e => e.id === selectedEmpId);
-      if (!exists) {
+    if (selectedEmpId && branches.length > 0) {
+      const existsInCompany = branches.some(b => (b.employees || []).some(e => e.id === selectedEmpId));
+      if (!existsInCompany) {
         setSelectedEmpId('');
         setTypedEmpName('');
-      } else if (exists && !typedEmpName) {
-        const found = currentBranch.employees.find(e => e.id === selectedEmpId);
-        if (found) setTypedEmpName(found.name);
       }
     }
-  }, [selectedBranchId, branches]);
+  }, [branches, selectedEmpId]);
 
   // Clear bulk staff selection when changing active branch in Admin
   useEffect(() => {
@@ -897,22 +893,25 @@ export default function App() {
     const curMonth = now.getMonth();
     const curDate = now.getDate();
 
-    // 1. Try parsing numeric timestamp from ID (e.g. REC-1791438659468)
-    if (r.id && typeof r.id === 'string' && r.id.startsWith('REC-')) {
-      const ts = Number(r.id.slice(4));
-      if (!isNaN(ts) && ts > 1600000000000) {
-        const d = new Date(ts);
-        if (d.getFullYear() === curYear && d.getMonth() === curMonth && d.getDate() === curDate) {
-          return true;
-        }
+    // 1. Try explicit numeric timestamp
+    if (r.timestamp && !isNaN(Number(r.timestamp))) {
+      const d = new Date(Number(r.timestamp));
+      if (!isNaN(d.getTime())) {
+        return d.getFullYear() === curYear && d.getMonth() === curMonth && d.getDate() === curDate;
       }
     }
 
-    // 2. Try explicit timestamp property
-    if (r.timestamp && !isNaN(Number(r.timestamp))) {
-      const d = new Date(Number(r.timestamp));
-      if (d.getFullYear() === curYear && d.getMonth() === curMonth && d.getDate() === curDate) {
-        return true;
+    // 2. Try parsing numeric timestamp from ID (e.g. REC-1791438659468)
+    if (r.id && typeof r.id === 'string' && r.id.startsWith('REC-')) {
+      const idSub = r.id.slice(4);
+      if (!isNaN(Number(idSub))) {
+        const ts = Number(idSub);
+        if (ts > 1600000000000) {
+          const d = new Date(ts);
+          if (!isNaN(d.getTime())) {
+            return d.getFullYear() === curYear && d.getMonth() === curMonth && d.getDate() === curDate;
+          }
+        }
       }
     }
 
@@ -920,34 +919,46 @@ export default function App() {
     if (r.created_at) {
       const d = new Date(r.created_at);
       if (!isNaN(d.getTime())) {
-        if (d.getFullYear() === curYear && d.getMonth() === curMonth && d.getDate() === curDate) {
-          return true;
-        }
+        return d.getFullYear() === curYear && d.getMonth() === curMonth && d.getDate() === curDate;
       }
     }
 
-    // 4. Try parsing r.date (handles "8 Oct 2026", "Oct 8, 2026", "2026-10-08", etc.)
+    // 4. Try parsing r.date safely
     if (r.date) {
       const d = new Date(r.date);
       if (!isNaN(d.getTime())) {
-        if (d.getFullYear() === curYear && d.getMonth() === curMonth && d.getDate() === curDate) {
-          return true;
-        }
+        return d.getFullYear() === curYear && d.getMonth() === curMonth && d.getDate() === curDate;
       }
 
-      // 5. String component matching (handles non-standard locale formatting)
-      const dateStr = String(r.date).toLowerCase();
-      const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-      const curMonthName = monthNames[curMonth];
-      const curDateStr = String(curDate);
-      const curYearStr = String(curYear);
+      // 5. Robust word/number token parsing (prevents matching "6" inside year "2026")
+      const dateStr = String(r.date).trim();
+      const tokens = dateStr.match(/\b([a-zA-Z]+|\d+)\b/g);
+      if (tokens && tokens.length >= 3) {
+        let parsedDay = null;
+        let parsedMonth = null;
+        let parsedYear = null;
+        const monthMap = {
+          jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+          jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+        };
 
-      if (
-        dateStr.includes(curMonthName) &&
-        dateStr.includes(curYearStr) &&
-        (dateStr.includes(curDateStr) || dateStr.includes(curDateStr.padStart(2, '0')))
-      ) {
-        return true;
+        tokens.forEach(tok => {
+          const lower = tok.toLowerCase();
+          if (monthMap[lower.slice(0, 3)] !== undefined) {
+            parsedMonth = monthMap[lower.slice(0, 3)];
+          } else if (/^\d{4}$/.test(tok)) {
+            parsedYear = parseInt(tok, 10);
+          } else if (/^\d{1,2}$/.test(tok)) {
+            const num = parseInt(tok, 10);
+            if (num >= 1 && num <= 31 && parsedDay === null) {
+              parsedDay = num;
+            }
+          }
+        });
+
+        if (parsedYear === curYear && parsedMonth === curMonth && parsedDay === curDate) {
+          return true;
+        }
       }
     }
 
@@ -1065,9 +1076,9 @@ export default function App() {
   // Smart Status Detection: Find latest attendance record for this employee today
   const latestTodayRecord = activeFormEmpName 
     ? records.find(r => {
-        const empName = (r.employeeName || r.name || '').trim().toLowerCase();
-        const targetName = activeFormEmpName.trim().toLowerCase();
-        const matchesEmp = empName === targetName || empName.includes(targetName) || targetName.includes(empName);
+        const empName = (r.employeeName || r.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+        const targetName = activeFormEmpName.trim().toLowerCase().replace(/\s+/g, ' ');
+        const matchesEmp = empName === targetName;
         return matchesEmp && isRecordToday(r);
       })
     : null;
@@ -1097,10 +1108,10 @@ export default function App() {
   // Today's attendance records for the currently selected employee
   const currentEmployeeTodayRecords = useMemo(() => {
     if (!activeFormEmpName) return [];
-    const targetName = activeFormEmpName.trim().toLowerCase();
+    const targetName = activeFormEmpName.trim().toLowerCase().replace(/\s+/g, ' ');
     return todayRecords.filter(r => {
-      const empName = (r.employeeName || r.name || '').trim().toLowerCase();
-      return empName === targetName || empName.includes(targetName) || targetName.includes(empName);
+      const empName = (r.employeeName || r.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      return empName === targetName;
     });
   }, [todayRecords, activeFormEmpName]);
 
@@ -2314,10 +2325,19 @@ export default function App() {
 
     const empName = currentFormEmployee.name;
 
-    // Guardrail: Cannot Check Out if not checked in yet
+    // Guardrail: Confirmation if checking out without active check in
     if (actionType === 'out' && latestTodayRecord?.type !== 'in') {
-      setFormValidationMsg('Check In is required first before you can Check Out.');
-      return;
+      if (!latestTodayRecord) {
+        const proceedWithoutCheckIn = window.confirm(
+          `No morning Check In was found for ${empName} today. Do you still want to record your Check Out now?`
+        );
+        if (!proceedWithoutCheckIn) return;
+      } else if (latestTodayRecord.type === 'out') {
+        const proceedDoubleCheckOut = window.confirm(
+          `${empName} was already checked out today at ${formatTo12HourTime(latestTodayRecord.shortTime || latestTodayRecord.time)}. Do you want to record another Check Out?`
+        );
+        if (!proceedDoubleCheckOut) return;
+      }
     }
 
     // Guardrail: Cannot Check In if already checked in
@@ -2481,6 +2501,7 @@ export default function App() {
       const newRecord = {
         id: 'REC-' + Date.now(),
         timestamp: now.getTime(),
+        created_at: now.toISOString(),
         employeeName: activeEmpName,
         employeeRole: activeEmpRole,
         branchName: activeBranchName,
@@ -3215,14 +3236,16 @@ export default function App() {
                     id="btn-check-out"
                     className={`clean-btn clean-btn-out ${latestTodayRecord?.type === 'in' ? 'btn-highlighted-action' : ''}`}
                     onClick={() => handleActionClick('out')}
-                    disabled={!currentFormEmployee || latestTodayRecord?.type !== 'in'}
+                    disabled={!currentFormEmployee || latestTodayRecord?.type === 'out'}
                     title={
                       !currentFormEmployee
                         ? (typedEmpName.trim() && matchedCompanyEmployees.length > 1
                             ? 'Please select which employee you are before checking out'
                             : 'Select or verify your registered name from employee list to check out')
-                        : latestTodayRecord?.type !== 'in'
-                        ? 'Check in required before checking out'
+                        : latestTodayRecord?.type === 'out'
+                        ? `${activeFormEmpName} is already checked out today`
+                        : latestTodayRecord?.type === 'in'
+                        ? 'Record Check Out (Shift active)'
                         : 'Record Check Out'
                     }
                   >

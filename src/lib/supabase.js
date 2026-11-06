@@ -286,6 +286,8 @@ export async function fetchAttendanceFromSupabase() {
 
     return data.map(r => ({
       id: r.id,
+      timestamp: r.created_at ? new Date(r.created_at).getTime() : (r.id && r.id.startsWith('REC-') && !isNaN(Number(r.id.slice(4))) ? Number(r.id.slice(4)) : null),
+      created_at: r.created_at,
       employeeName: r.employee_name,
       employeeRole: r.employee_role || '',
       branchName: r.branch_name,
