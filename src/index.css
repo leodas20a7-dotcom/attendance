@@ -9506,3 +9506,24 @@ th.th-missed {
     transform: translateY(0);
   }
 }
+
+/* ================= RESPONSIVE SWITCH FOR BRANCH MANAGEMENT ================= */
+/* Desktop: Show 2-Column Split Layout, Hide Mobile In-Place Accordion */
+@media (min-width: 900px) {
+  .desktop-only-layout {
+    display: grid !important;
+  }
+  .mobile-only-accordion {
+    display: none !important;
+  }
+}
+
+/* Mobile & Tablet (< 900px): Show Mobile In-Place Accordion, Hide Desktop Split */
+@media (max-width: 899px) {
+  .desktop-only-layout {
+    display: none !important;
+  }
+  .mobile-only-accordion {
+    display: flex !important;
+  }
+}
