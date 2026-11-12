@@ -10866,6 +10866,27 @@ th.th-missed {
   color: #ffffff;
 }
 
+.btn-clear-telemetry {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
+  color: #e11d24;
+  padding: 0.35rem 0.7rem;
+  border-radius: 7px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-clear-telemetry:hover {
+  background: #e11d24;
+  border-color: #e11d24;
+  color: #ffffff;
+}
+
 /* KPI Bar */
 .version-audit-kpi-bar {
   display: grid;

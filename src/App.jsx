@@ -104,6 +104,7 @@ import {
   removeCircularFromSupabase,
   syncDeviceTelemetryToSupabase,
   fetchDeviceTelemetryFromSupabase,
+  clearDeviceTelemetryFromSupabase,
   SUPABASE_SCHEMA_SQL
 } from './lib/supabase';
 
@@ -544,12 +545,14 @@ export default function App() {
       const modeDesc = standalone ? 'PWA Standalone' : 'Browser';
       const summary = `${platformDesc} (${modeDesc})`;
 
-      // Generate a stable device ID in localStorage
-      let deviceId = localStorage.getItem('convenio_device_telemetry_id');
-      if (!deviceId) {
-        deviceId = 'dev_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now().toString(36);
-        localStorage.setItem('convenio_device_telemetry_id', deviceId);
+      // Stable device fingerprint: Platform + Standalone Mode (1 unique record per browser/device)
+      let localDevToken = localStorage.getItem('convenio_device_token');
+      if (!localDevToken) {
+        localDevToken = 'tok_' + Math.random().toString(36).substring(2, 8);
+        localStorage.setItem('convenio_device_token', localDevToken);
       }
+
+      const deviceId = `dev_${platformDesc.toLowerCase()}_${standalone ? 'pwa' : 'web'}_${localDevToken}`;
 
       const activeBranch = branches.find(b => b.id === selectedBranchId)?.name || 'Convenio Mart';
       const activeEmp = (typedEmpName || '').trim() || 'Kiosk Device';
@@ -592,6 +595,13 @@ export default function App() {
       setDeviceTelemetryList(data);
     }
     setTelemetryLoading(false);
+  };
+
+  const handleClearDeviceTelemetry = async () => {
+    if (window.confirm('Reset all device update telemetry history? Active devices will report their clean status on their next launch.')) {
+      await clearDeviceTelemetryFromSupabase();
+      setDeviceTelemetryList([]);
+    }
   };
 
   // Supabase Cloud State
@@ -8186,6 +8196,17 @@ export default function App() {
                   <RefreshCw size={14} className={telemetryLoading ? 'pwa-spin' : ''} />
                   <span>Refresh</span>
                 </button>
+                {deviceTelemetryList.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn-clear-telemetry"
+                    onClick={handleClearDeviceTelemetry}
+                    title="Clear old test telemetry records"
+                  >
+                    <Trash2 size={14} />
+                    <span>Clear</span>
+                  </button>
+                )}
                 <button 
                   type="button" 
                   className="icon-close-btn" 

@@ -562,3 +562,14 @@ export async function fetchDeviceTelemetryFromSupabase() {
   }
 }
 
+/**
+ * Clear all device telemetry records from Supabase
+ */
+export async function clearDeviceTelemetryFromSupabase() {
+  try {
+    await supabase.from('device_telemetry').delete().neq('id', 'placeholder-none');
+  } catch (err) {
+    console.warn('Failed to clear device telemetry:', err);
+  }
+}
+
