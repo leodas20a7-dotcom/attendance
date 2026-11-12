@@ -2163,15 +2163,18 @@ export default function App() {
       knownBranchMap.get(bKey).totalPunches++;
     });
 
-    // Group employee punches inside each branch
+    // Group employee punches inside each branch (Strictly active registered employees only)
     knownBranchMap.forEach((branchObj, bKey) => {
-      const branchPunches = punches.filter(p => (p.branchName || '').trim().toLowerCase() === bKey);
+      const branchPunches = punches.filter(p => {
+        const empName = (p.employeeName || p.name || '').trim().toLowerCase();
+        return (p.branchName || '').trim().toLowerCase() === bKey && activeEmployeeNamesSet.has(empName);
+      });
       const empMap = new Map();
 
       branchPunches.forEach(p => {
         const empName = (p.employeeName || p.name || '').trim();
-        if (!empName) return;
         const empKey = empName.toLowerCase();
+        if (!empName || !activeEmployeeNamesSet.has(empKey)) return;
         if (!empMap.has(empKey)) {
           empMap.set(empKey, {
             name: empName,
