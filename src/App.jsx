@@ -53,7 +53,9 @@ import {
   ChevronsRight,
   Megaphone,
   Send,
-  Download
+  Download,
+  Smartphone,
+  Sparkles
 } from 'lucide-react';
 
 import jsPDF from 'jspdf';
@@ -100,6 +102,8 @@ import {
   fetchCircularsFromSupabase,
   syncCircularToSupabase,
   removeCircularFromSupabase,
+  syncDeviceTelemetryToSupabase,
+  fetchDeviceTelemetryFromSupabase,
   SUPABASE_SCHEMA_SQL
 } from './lib/supabase';
 
@@ -110,7 +114,8 @@ import {
   checkForAppUpdate,
   dismissUpdateNotification,
   getDeviceInfo,
-  isAppInstalled
+  isAppInstalled,
+  CURRENT_APP_VERSION
 } from './lib/pwaManager';
 
 import {
@@ -482,6 +487,11 @@ export default function App() {
   const [adminLogSearch, setAdminLogSearch] = useState('');
   const [adminLogCategoryFilter, setAdminLogCategoryFilter] = useState('all');
 
+  // Device & Version Telemetry State
+  const [showVersionAuditModal, setShowVersionAuditModal] = useState(false);
+  const [deviceTelemetryList, setDeviceTelemetryList] = useState([]);
+  const [telemetryLoading, setTelemetryLoading] = useState(false);
+
   const logAdminAction = (category, title, details = {}) => {
     const now = getServerNow();
     const newLog = {
@@ -524,6 +534,64 @@ export default function App() {
 
   // Admin search inside employee roster
   const [adminEmpSearch, setAdminEmpSearch] = useState('');
+
+  // Device Telemetry Sync Handler (logs device info & version adoption)
+  const reportDeviceTelemetry = useCallback(async (actionName = 'launch') => {
+    try {
+      const dev = getDeviceInfo();
+      const standalone = isAppInstalled();
+      const platformDesc = dev.isAndroid ? 'Android' : dev.isIOS ? 'iOS' : 'Desktop';
+      const modeDesc = standalone ? 'PWA Standalone' : 'Browser';
+      const summary = `${platformDesc} (${modeDesc})`;
+
+      // Generate a stable device ID in localStorage
+      let deviceId = localStorage.getItem('convenio_device_telemetry_id');
+      if (!deviceId) {
+        deviceId = 'dev_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now().toString(36);
+        localStorage.setItem('convenio_device_telemetry_id', deviceId);
+      }
+
+      const activeBranch = branches.find(b => b.id === selectedBranchId)?.name || 'Convenio Mart';
+      const activeEmp = (typedEmpName || '').trim() || 'Kiosk Device';
+
+      const telemetryObj = {
+        id: deviceId,
+        employeeName: activeEmp,
+        branchName: activeBranch,
+        appVersion: CURRENT_APP_VERSION,
+        deviceSummary: summary,
+        platform: platformDesc,
+        isStandalone: standalone,
+        action: actionName,
+        date: new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
+        time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
+      };
+
+      // 1. Send to Supabase
+      await syncDeviceTelemetryToSupabase(telemetryObj);
+
+      // 2. Local fallback log in admin actions if updated
+      if (actionName === 'updated') {
+        logAdminAction('system', `Device updated to ${CURRENT_APP_VERSION}`, {
+          device: summary,
+          employee: activeEmp,
+          branch: activeBranch
+        });
+      }
+    } catch (e) {
+      console.warn('Telemetry report error:', e);
+    }
+  }, [branches, selectedBranchId, typedEmpName]);
+
+  // Load telemetry records when opening version audit modal
+  const loadDeviceTelemetry = async () => {
+    setTelemetryLoading(true);
+    const data = await fetchDeviceTelemetryFromSupabase();
+    if (data && Array.isArray(data)) {
+      setDeviceTelemetryList(data);
+    }
+    setTelemetryLoading(false);
+  };
 
   // Supabase Cloud State
   const [supabaseStatus, setSupabaseStatus] = useState({ connected: false, tablesReady: false });
@@ -731,14 +799,23 @@ export default function App() {
     };
   }, []);
 
-  // Initialize PWA and Smart Deploy Update Detector
+  // Initialize PWA, Smart Deploy Update Detector & Telemetry Heartbeat
   useEffect(() => {
     const cleanup = initPwaManager({
       onUpdateAvailable: () => setAppUpdateAvailable(true),
       onInstallableChange: (canInstall) => setCanInstallPwa(canInstall)
     });
-    return cleanup;
-  }, []);
+
+    // Report device heartbeat telemetry on load (after 2s delay)
+    const t = setTimeout(() => {
+      reportDeviceTelemetry('active_session');
+    }, 2000);
+
+    return () => {
+      clearTimeout(t);
+      cleanup();
+    };
+  }, [reportDeviceTelemetry]);
 
   const navigateTo = (newView) => {
     setView(newView);
@@ -3345,8 +3422,10 @@ export default function App() {
             <button 
               className="pwa-update-btn"
               disabled={isUpdatingApp}
-              onClick={() => {
+              onClick={async () => {
                 setIsUpdatingApp(true);
+                // Immediately capture telemetry that user triggered the update
+                await reportDeviceTelemetry('updated');
                 applyImmediateUpdate();
               }}
             >
@@ -6479,14 +6558,32 @@ export default function App() {
                 </div>
                 <h3 className="settings-modal-title">Admin Action History</h3>
               </div>
-              <button 
-                type="button" 
-                className="icon-close-btn" 
-                onClick={() => setShowSettingsModal(false)}
-                title="Close"
-              >
-                <X size={20} />
-              </button>
+
+              {/* Version & Device Telemetry Quick Button (In User's Red Box Location) */}
+              <div className="settings-header-right-tools">
+                <button
+                  type="button"
+                  className="btn-version-telemetry-badge"
+                  onClick={() => {
+                    loadDeviceTelemetry();
+                    setShowVersionAuditModal(true);
+                  }}
+                  title="View which employees & devices have updated to the latest version"
+                >
+                  <Smartphone size={14} />
+                  <span>App Updates</span>
+                  <span className="telemetry-pill-current">{CURRENT_APP_VERSION}</span>
+                </button>
+
+                <button 
+                  type="button" 
+                  className="icon-close-btn" 
+                  onClick={() => setShowSettingsModal(false)}
+                  title="Close"
+                >
+                  <X size={20} />
+                </button>
+              </div>
             </div>
 
             {/* Compact Search & Filter Bar */}
@@ -8038,6 +8135,192 @@ export default function App() {
                 }}
               >
                 <span>Check Out Early</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL: DEVICE VERSION ADOPTION & UPDATE TELEMETRY AUDIT ================= */}
+      {showVersionAuditModal && (
+        <div 
+          className="modal-overlay" 
+          onClick={() => setShowVersionAuditModal(false)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div 
+            className="modal-content modal-form version-audit-modal" 
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="modal-header-row version-audit-header">
+              <div className="modal-title-with-icon">
+                <div className="settings-header-icon-box version-icon-box">
+                  <Smartphone size={20} />
+                </div>
+                <div>
+                  <h3 className="settings-modal-title">App Version & Device Adoption</h3>
+                  <p className="version-audit-subtitle">
+                    Live telemetry tracking which employees & store devices have updated to the latest build
+                  </p>
+                </div>
+              </div>
+
+              <div className="version-audit-actions">
+                <button
+                  type="button"
+                  className="btn-refresh-telemetry"
+                  onClick={loadDeviceTelemetry}
+                  disabled={telemetryLoading}
+                  title="Refresh device telemetry"
+                >
+                  <RefreshCw size={14} className={telemetryLoading ? 'pwa-spin' : ''} />
+                  <span>Refresh</span>
+                </button>
+                <button 
+                  type="button" 
+                  className="icon-close-btn" 
+                  onClick={() => setShowVersionAuditModal(false)}
+                  title="Close"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+
+            {/* Current Published Version Banner */}
+            <div className="version-audit-kpi-bar">
+              <div className="version-kpi-item">
+                <span className="version-kpi-label">Latest Published Version</span>
+                <span className="version-kpi-value text-blue-600">
+                  <Sparkles size={16} />
+                  <strong>{CURRENT_APP_VERSION}</strong>
+                </span>
+              </div>
+              <div className="version-kpi-item">
+                <span className="version-kpi-label">Tracked Active Devices</span>
+                <span className="version-kpi-value text-emerald-600">
+                  <Smartphone size={16} />
+                  <strong>{deviceTelemetryList.length}</strong>
+                </span>
+              </div>
+              <div className="version-kpi-item">
+                <span className="version-kpi-label">Adoption Status</span>
+                <span className="version-kpi-value text-purple-600">
+                  {(() => {
+                    if (deviceTelemetryList.length === 0) return <strong>Syncing...</strong>;
+                    const latestCount = deviceTelemetryList.filter(d => d.appVersion === CURRENT_APP_VERSION).length;
+                    const pct = Math.round((latestCount / deviceTelemetryList.length) * 100);
+                    return <strong>{pct}% Updated</strong>;
+                  })()}
+                </span>
+              </div>
+            </div>
+
+            {/* Device Telemetry Table */}
+            <div className="version-audit-body">
+              {telemetryLoading ? (
+                <div className="version-loading-state">
+                  <Loader2 size={32} className="pwa-spin" />
+                  <p>Fetching real-time device telemetry from Supabase...</p>
+                </div>
+              ) : deviceTelemetryList.length === 0 ? (
+                <div className="version-empty-state">
+                  <Smartphone size={36} className="text-gray-400" />
+                  <h4>No Device Telemetry Recorded Yet</h4>
+                  <p>
+                    When employees open the app or tap "Update Now", their device OS, store location, and installed app version will sync here automatically.
+                  </p>
+                </div>
+              ) : (
+                <div className="version-table-container">
+                  <table className="version-telemetry-table">
+                    <thead>
+                      <tr>
+                        <th>Employee / Device</th>
+                        <th>Store Branch</th>
+                        <th>Device & OS</th>
+                        <th>App Version</th>
+                        <th>Status</th>
+                        <th>Last Activity</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {deviceTelemetryList.map((dev) => {
+                        const isLatest = dev.appVersion === CURRENT_APP_VERSION;
+                        return (
+                          <tr key={dev.id} className="version-table-row">
+                            <td className="col-dev-name">
+                              <div className="dev-name-wrap">
+                                <span className="dev-avatar">
+                                  {(dev.employeeName || 'D').charAt(0).toUpperCase()}
+                                </span>
+                                <div>
+                                  <strong className="dev-name-text">{dev.employeeName}</strong>
+                                  <span className="dev-id-micro">{dev.id}</span>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="col-dev-branch">
+                              <span className="dev-branch-badge">
+                                <Store size={12} />
+                                <span>{dev.branchName || 'Convenio Mart'}</span>
+                              </span>
+                            </td>
+                            <td className="col-dev-platform">
+                              <span className="dev-platform-pill">
+                                <Smartphone size={11} />
+                                <span>{dev.deviceSummary || 'Web Client'}</span>
+                              </span>
+                            </td>
+                            <td className="col-dev-version">
+                              <code className={`dev-version-tag ${isLatest ? 'is-latest' : 'is-old'}`}>
+                                {dev.appVersion}
+                              </code>
+                            </td>
+                            <td className="col-dev-status">
+                              {isLatest ? (
+                                <span className="dev-status-chip up-to-date">
+                                  <Check size={11} />
+                                  <span>Latest</span>
+                                </span>
+                              ) : (
+                                <span className="dev-status-chip outdated">
+                                  <span>Pending Update</span>
+                                </span>
+                              )}
+                            </td>
+                            <td className="col-dev-time">
+                              <span className="dev-time-text">
+                                {dev.lastSeenDate} • {formatTo12HourTime(dev.lastSeenTime)}
+                              </span>
+                              {dev.action && (
+                                <span className="dev-action-subtag">
+                                  {dev.action === 'updated' ? '⚡ Clicked Update Now' : 'Active session'}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="version-audit-footer">
+              <span className="version-footer-hint">
+                Devices automatically report their version heartbeat when staff use the app or install updates.
+              </span>
+              <button
+                type="button"
+                className="version-close-btn"
+                onClick={() => setShowVersionAuditModal(false)}
+              >
+                Close
               </button>
             </div>
           </div>

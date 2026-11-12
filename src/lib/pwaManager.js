@@ -9,7 +9,7 @@ let isUpdateAvailable = false;
 let isChecking = false;
 
 // Version identifier injected by Vite at build time
-const CURRENT_APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'prod';
+export const CURRENT_APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'prod';
 const IS_DEV = typeof __IS_DEV__ !== 'undefined' 
   ? __IS_DEV__ 
   : (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');

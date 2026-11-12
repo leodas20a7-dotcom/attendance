@@ -87,6 +87,25 @@ CREATE TABLE IF NOT EXISTS public.circulars (
 ALTER TABLE public.circulars ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Public full access to circulars" ON public.circulars;
 CREATE POLICY "Public full access to circulars" ON public.circulars FOR ALL USING (true) WITH CHECK (true);
+
+-- 6. Device Version Telemetry Table
+CREATE TABLE IF NOT EXISTS public.device_telemetry (
+  id TEXT PRIMARY KEY,
+  employee_name TEXT NOT NULL,
+  branch_name TEXT,
+  app_version TEXT NOT NULL,
+  device_summary TEXT,
+  platform TEXT,
+  is_standalone BOOLEAN DEFAULT false,
+  action TEXT DEFAULT 'launch',
+  last_seen_date TEXT,
+  last_seen_time TEXT,
+  updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.device_telemetry ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public full access to device_telemetry" ON public.device_telemetry;
+CREATE POLICY "Public full access to device_telemetry" ON public.device_telemetry FOR ALL USING (true) WITH CHECK (true);
 `;
 
 /**
@@ -465,6 +484,62 @@ export async function removeCircularFromSupabase(circularId) {
     await supabase.from('circulars').delete().eq('id', circularId);
   } catch (err) {
     console.warn('Failed to delete circular from Supabase:', err);
+  }
+}
+
+/**
+ * Sync device update / version telemetry to Supabase
+ */
+export async function syncDeviceTelemetryToSupabase(telemetry) {
+  try {
+    if (!telemetry || !telemetry.id) return;
+    await supabase.from('device_telemetry').upsert({
+      id: telemetry.id,
+      employee_name: telemetry.employeeName || 'Kiosk Device',
+      branch_name: telemetry.branchName || 'Convenio Mart',
+      app_version: telemetry.appVersion || 'prod',
+      device_summary: telemetry.deviceSummary || 'Web Device',
+      platform: telemetry.platform || 'unknown',
+      is_standalone: Boolean(telemetry.isStandalone),
+      action: telemetry.action || 'launch',
+      last_seen_date: telemetry.date || new Date().toISOString().split('T')[0],
+      last_seen_time: telemetry.time || new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      updated_at: new Date().toISOString()
+    });
+  } catch (err) {
+    // Graceful fallback: table might not be created in Supabase yet
+    console.warn('Device telemetry sync note:', err.message || err);
+  }
+}
+
+/**
+ * Fetch all device version telemetry records from Supabase
+ */
+export async function fetchDeviceTelemetryFromSupabase() {
+  try {
+    const { data, error } = await supabase
+      .from('device_telemetry')
+      .select('*')
+      .order('updated_at', { ascending: false });
+
+    if (error || !data) return null;
+
+    return data.map(d => ({
+      id: d.id,
+      employeeName: d.employee_name,
+      branchName: d.branch_name,
+      appVersion: d.app_version,
+      deviceSummary: d.device_summary,
+      platform: d.platform,
+      isStandalone: d.is_standalone,
+      action: d.action,
+      lastSeenDate: d.last_seen_date,
+      lastSeenTime: d.last_seen_time,
+      updatedAt: d.updated_at
+    }));
+  } catch (err) {
+    console.warn('Error fetching device telemetry:', err);
+    return null;
   }
 }
 
