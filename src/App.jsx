@@ -2024,11 +2024,11 @@ export default function App() {
   };
 
   // Helper to compute live/historical shift progress against 9-hour target for an employee on a given day
-  const getEmployeeShiftMetrics = useCallback((empName, dateStr, refPunches = null) => {
+  const getEmployeeShiftMetrics = useCallback((empName, dateStr = null, refPunches = null) => {
     if (!empName) return null;
     const targetName = empName.trim().toLowerCase();
 
-    // Source punches: passed directly or filtered from all records
+    // Source punches: passed directly, or filtered by date (or today's punches if dateStr is null)
     const dayPunches = (refPunches || records).filter(r => {
       const eName = (r.employeeName || r.name || '').trim().toLowerCase();
       const matchName = eName === targetName || eName.includes(targetName) || targetName.includes(eName);
@@ -2036,7 +2036,7 @@ export default function App() {
       if (dateStr) {
         return r.date === dateStr;
       }
-      return true;
+      return isRecordToday(r);
     }).sort((a, b) => {
       const tsA = a.timestamp || (a.id && a.id.startsWith('REC-') ? Number(a.id.slice(4)) || 0 : 0);
       const tsB = b.timestamp || (b.id && b.id.startsWith('REC-') ? Number(b.id.slice(4)) || 0 : 0);
@@ -2943,19 +2943,23 @@ export default function App() {
 
     // Smart Shift Check: Early Checkout Confirmation if worked less than 9 hours
     if (actionType === 'out' && latestTodayRecord?.type === 'in') {
-      const shiftMetrics = getEmployeeShiftMetrics(empName, formatDate(new Date()));
-      if (shiftMetrics && !shiftMetrics.isTargetMet) {
-        // Trigger smart confirmation modal instead of proceeding silently
-        setEarlyCheckoutWarning({
-          employeeName: empName,
-          shiftMetrics,
-          onConfirm: () => {
-            setEarlyCheckoutWarning(null);
-            setFormValidationMsg('');
-            startCamera('out');
-          }
-        });
-        return;
+      try {
+        const shiftMetrics = getEmployeeShiftMetrics(empName, null);
+        if (shiftMetrics && !shiftMetrics.isTargetMet) {
+          // Trigger smart confirmation modal instead of proceeding silently
+          setEarlyCheckoutWarning({
+            employeeName: empName,
+            shiftMetrics,
+            onConfirm: () => {
+              setEarlyCheckoutWarning(null);
+              setFormValidationMsg('');
+              startCamera('out');
+            }
+          });
+          return;
+        }
+      } catch (err) {
+        console.warn('Shift metrics evaluation fallback:', err);
       }
     }
 
@@ -3787,9 +3791,14 @@ export default function App() {
 
                 {/* Smart Status Detection Banner & 9-Hour Work Duration Tracker */}
                 {activeFormEmpName && (() => {
-                  const shiftMetrics = latestTodayRecord?.type === 'in'
-                    ? getEmployeeShiftMetrics(activeFormEmpName, formatDate(new Date()))
-                    : null;
+                  let shiftMetrics = null;
+                  try {
+                    shiftMetrics = latestTodayRecord?.type === 'in'
+                      ? getEmployeeShiftMetrics(activeFormEmpName, null)
+                      : null;
+                  } catch (e) {
+                    console.warn('Banner shift metrics error:', e);
+                  }
 
                   return (
                     <div className={`smart-status-banner status-${latestTodayRecord?.type || 'none'}`}>
