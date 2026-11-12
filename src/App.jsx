@@ -298,6 +298,13 @@ export default function App() {
   const [timesheetBranchId, setTimesheetBranchId] = useState('all');
   const [timesheetSearch, setTimesheetSearch] = useState('');
 
+  // Payroll Attendance Calendar State (Admin only)
+  const [payrollCalYear, setPayrollCalYear] = useState(() => new Date().getFullYear());
+  const [payrollCalMonth, setPayrollCalMonth] = useState(() => new Date().getMonth());
+  const [payrollCalBranchFilter, setPayrollCalBranchFilter] = useState('all');
+  const [payrollSelectedDateModal, setPayrollSelectedDateModal] = useState(null); // { year, month, day, dateStr }
+  const [payrollExpandedBranchId, setPayrollExpandedBranchId] = useState(null); // Branch ID currently expanded in drilldown modal
+
   // Individual Staff Attendance Calendar Modal State
   const [calendarStaff, setCalendarStaff] = useState(null);
   const [calendarYear, setCalendarYear] = useState(() => new Date().getFullYear());
@@ -1743,6 +1750,335 @@ export default function App() {
     });
 
     doc.save(`Convenio_Timesheet_${monthStr}_${timesheetYear}.pdf`);
+  };
+
+  // ================= PAYROLL ATTENDANCE CALENDAR ENGINE =================
+  const payrollDaysInMonth = useMemo(() => {
+    return new Date(payrollCalYear, payrollCalMonth + 1, 0).getDate();
+  }, [payrollCalYear, payrollCalMonth]);
+
+  const payrollFirstDayOfWeek = useMemo(() => {
+    return new Date(payrollCalYear, payrollCalMonth, 1).getDay(); // 0 = Sun, 1 = Mon ...
+  }, [payrollCalYear, payrollCalMonth]);
+
+  const handlePrevPayrollMonth = () => {
+    if (payrollCalMonth === 0) {
+      setPayrollCalMonth(11);
+      setPayrollCalYear(y => y - 1);
+    } else {
+      setPayrollCalMonth(m => m - 1);
+    }
+  };
+
+  const handleNextPayrollMonth = () => {
+    if (payrollCalMonth === 11) {
+      setPayrollCalMonth(0);
+      setPayrollCalYear(y => y + 1);
+    } else {
+      setPayrollCalMonth(m => m + 1);
+    }
+  };
+
+  const handleCurrentPayrollMonth = () => {
+    const now = new Date();
+    setPayrollCalYear(now.getFullYear());
+    setPayrollCalMonth(now.getMonth());
+  };
+
+  // Map of all punches for the active payroll calendar month, indexed by day (1..31)
+  const payrollMonthDaysMap = useMemo(() => {
+    const dayMap = {};
+    for (let d = 1; d <= payrollDaysInMonth; d++) {
+      dayMap[d] = [];
+    }
+
+    records.forEach(r => {
+      const comp = getRecordDateComponents(r);
+      if (!comp) return;
+      if (comp.year === payrollCalYear && comp.month === payrollCalMonth) {
+        if (dayMap[comp.day]) {
+          dayMap[comp.day].push(r);
+        }
+      }
+    });
+
+    return dayMap;
+  }, [records, payrollCalYear, payrollCalMonth, payrollDaysInMonth, getRecordDateComponents]);
+
+  // Aggregate day statistics for each cell in the calendar grid
+  const getPayrollDayStats = useCallback((day) => {
+    const punches = payrollMonthDaysMap[day] || [];
+    if (punches.length === 0) {
+      return { totalPunches: 0, distinctStaff: 0, distinctBranches: 0, branches: {} };
+    }
+
+    const staffSet = new Set();
+    const branchMap = {};
+
+    punches.forEach(p => {
+      const empName = (p.employeeName || p.name || '').trim();
+      const bName = (p.branchName || 'Convenio Mart').trim();
+      if (empName) staffSet.add(empName.toLowerCase());
+
+      if (!branchMap[bName]) {
+        branchMap[bName] = { name: bName, staffMap: {}, punchesCount: 0 };
+      }
+      branchMap[bName].punchesCount++;
+
+      if (empName) {
+        const empKey = empName.toLowerCase();
+        if (!branchMap[bName].staffMap[empKey]) {
+          branchMap[bName].staffMap[empKey] = {
+            name: empName,
+            role: p.employeeRole || 'Staff',
+            punches: []
+          };
+        }
+        branchMap[bName].staffMap[empKey].punches.push(p);
+      }
+    });
+
+    return {
+      totalPunches: punches.length,
+      distinctStaff: staffSet.size,
+      distinctBranches: Object.keys(branchMap).length,
+      branches: branchMap
+    };
+  }, [payrollMonthDaysMap]);
+
+  // Helper to calculate total hours worked for an employee on a day from their punches
+  const calculateShiftDuration = (punches) => {
+    if (!punches || punches.length === 0) return { label: 'No punch', hours: 0, minutes: 0 };
+
+    const parseTimeToMinutes = (p) => {
+      // 1. Try numeric timestamp
+      if (p.timestamp && !isNaN(Number(p.timestamp))) {
+        const d = new Date(Number(p.timestamp));
+        return d.getHours() * 60 + d.getMinutes();
+      }
+      // 2. Try ID timestamp
+      if (p.id && typeof p.id === 'string' && p.id.startsWith('REC-') && !p.id.startsWith('REC-AUTO')) {
+        const num = Number(p.id.slice(4));
+        if (!isNaN(num) && num > 1600000000000) {
+          const d = new Date(num);
+          return d.getHours() * 60 + d.getMinutes();
+        }
+      }
+      // 3. Try created_at
+      if (p.created_at && !p.id?.startsWith('REC-AUTO')) {
+        const d = new Date(p.created_at);
+        if (!isNaN(d.getTime())) {
+          return d.getHours() * 60 + d.getMinutes();
+        }
+      }
+      // 4. Try parsing time string e.g. "08:19:01 AM"
+      const tStr = p.shortTime || p.time;
+      if (tStr) {
+        const m = tStr.match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)/i);
+        if (m) {
+          let h = parseInt(m[1], 10);
+          const mins = parseInt(m[2], 10);
+          const ampm = m[3].toUpperCase();
+          if (ampm === 'PM' && h < 12) h += 12;
+          if (ampm === 'AM' && h === 12) h = 0;
+          return h * 60 + mins;
+        }
+      }
+      return null;
+    };
+
+    const inPunches = punches.filter(p => p.type === 'in');
+    const outPunches = punches.filter(p => p.type === 'out');
+
+    if (inPunches.length === 0 && outPunches.length > 0) {
+      return { label: 'Checked Out', hours: 0, minutes: 0, incomplete: true };
+    }
+    if (inPunches.length > 0 && outPunches.length === 0) {
+      return { label: 'Shift in progress', hours: 0, minutes: 0, active: true };
+    }
+
+    const firstInMinutes = parseTimeToMinutes(inPunches[0]);
+    const lastOutMinutes = parseTimeToMinutes(outPunches[outPunches.length - 1]);
+
+    if (firstInMinutes !== null && lastOutMinutes !== null && lastOutMinutes >= firstInMinutes) {
+      const diff = lastOutMinutes - firstInMinutes;
+      const hours = Math.floor(diff / 60);
+      const minutes = diff % 60;
+      return {
+        label: `${hours}h ${minutes}m`,
+        hours,
+        minutes,
+        totalMinutes: diff,
+        completed: true
+      };
+    }
+
+    return { label: 'Punched', hours: 0, minutes: 0 };
+  };
+
+  // Open Day Drilldown Modal
+  const handleOpenPayrollDateModal = (day) => {
+    const d = new Date(payrollCalYear, payrollCalMonth, day);
+    const dateStr = d.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    setPayrollSelectedDateModal({ year: payrollCalYear, month: payrollCalMonth, day, dateStr });
+    setPayrollExpandedBranchId(null);
+  };
+
+  const handleClosePayrollDateModal = () => {
+    setPayrollSelectedDateModal(null);
+    setPayrollExpandedBranchId(null);
+  };
+
+  // Computed data for the active date drilldown popup
+  const activeDayPayrollDetails = useMemo(() => {
+    if (!payrollSelectedDateModal) return null;
+    const { year, month, day, dateStr } = payrollSelectedDateModal;
+    const punches = payrollMonthDaysMap[day] || [];
+
+    // Group all punches of this day by branch
+    const branchGroups = [];
+    const knownBranchMap = new Map();
+
+    // Seed all active branches configured in system
+    branches.forEach(b => {
+      knownBranchMap.set(b.name.trim().toLowerCase(), {
+        id: b.id,
+        name: b.name,
+        code: b.code || '',
+        employeesCount: (b.employees || []).length,
+        staffPresentList: [],
+        totalPunches: 0
+      });
+    });
+
+    punches.forEach(p => {
+      const bName = (p.branchName || 'Convenio Mart').trim();
+      const bKey = bName.toLowerCase();
+      if (!knownBranchMap.has(bKey)) {
+        knownBranchMap.set(bKey, {
+          id: `br-${bKey.replace(/[^a-z0-9]/g, '')}`,
+          name: bName,
+          code: '',
+          employeesCount: 0,
+          staffPresentList: [],
+          totalPunches: 0
+        });
+      }
+      knownBranchMap.get(bKey).totalPunches++;
+    });
+
+    // Group employee punches inside each branch
+    knownBranchMap.forEach((branchObj, bKey) => {
+      const branchPunches = punches.filter(p => (p.branchName || '').trim().toLowerCase() === bKey);
+      const empMap = new Map();
+
+      branchPunches.forEach(p => {
+        const empName = (p.employeeName || p.name || '').trim();
+        if (!empName) return;
+        const empKey = empName.toLowerCase();
+        if (!empMap.has(empKey)) {
+          empMap.set(empKey, {
+            name: empName,
+            role: p.employeeRole || 'Staff',
+            punches: []
+          });
+        }
+        empMap.get(empKey).punches.push(p);
+      });
+
+      const staffList = Array.from(empMap.values()).map(staff => {
+        // Sort punches chronologically
+        const sorted = [...staff.punches].sort((a, b) => {
+          const tsA = a.timestamp || (a.id && a.id.startsWith('REC-') ? Number(a.id.slice(4)) || 0 : 0);
+          const tsB = b.timestamp || (b.id && b.id.startsWith('REC-') ? Number(b.id.slice(4)) || 0 : 0);
+          return tsA - tsB;
+        });
+
+        const firstIn = sorted.find(p => p.type === 'in');
+        const lastOut = [...sorted].reverse().find(p => p.type === 'out');
+        const hasMissed = sorted.some(p => isMissedCheckoutRecord(p));
+        const duration = calculateShiftDuration(sorted);
+
+        return {
+          name: staff.name,
+          role: staff.role,
+          punches: sorted,
+          firstIn: firstIn ? (firstIn.shortTime || firstIn.time) : null,
+          lastOut: lastOut ? (lastOut.shortTime || lastOut.time) : null,
+          hasMissed,
+          duration
+        };
+      });
+
+      branchObj.staffPresentList = staffList;
+      branchGroups.push(branchObj);
+    });
+
+    // Sort: Branches with attendance first, then alphabetically
+    branchGroups.sort((a, b) => {
+      if (b.staffPresentList.length !== a.staffPresentList.length) {
+        return b.staffPresentList.length - a.staffPresentList.length;
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+    const totalStaffPresent = new Set(punches.map(p => (p.employeeName || p.name || '').trim().toLowerCase()).filter(Boolean)).size;
+    const branchesActiveCount = branchGroups.filter(b => b.staffPresentList.length > 0).length;
+
+    return {
+      dateStr,
+      day,
+      month,
+      year,
+      totalPunches: punches.length,
+      totalStaffPresent,
+      branchesActiveCount,
+      totalConfiguredBranches: branches.length,
+      branchGroups
+    };
+  }, [payrollSelectedDateModal, payrollMonthDaysMap, branches, isMissedCheckoutRecord]);
+
+  // Quick CSV export for the selected day drilldown (Payroll Audit)
+  const handleExportDailyPayrollCSV = () => {
+    if (!activeDayPayrollDetails) return;
+    const { dateStr, branchGroups } = activeDayPayrollDetails;
+
+    const headers = ['Date', 'Branch Name', 'Employee Name', 'Role', 'First Check In', 'Last Check Out', 'Hours Worked', 'Status'];
+    const rows = [];
+
+    branchGroups.forEach(b => {
+      b.staffPresentList.forEach(st => {
+        let status = 'Present';
+        if (st.hasMissed) status = 'Missed Checkout';
+        else if (st.duration?.active) status = 'Shift in Progress';
+
+        rows.push([
+          `"${dateStr}"`,
+          `"${b.name.replace(/"/g, '""')}"`,
+          `"${st.name.replace(/"/g, '""')}"`,
+          `"${st.role.replace(/"/g, '""')}"`,
+          `"${st.firstIn || '-'}"`,
+          `"${st.lastOut || '-'}"`,
+          `"${st.duration?.label || '-'}"`,
+          `"${status}"`
+        ]);
+      });
+    });
+
+    if (rows.length === 0) {
+      alert(`No staff attendance records to export for ${dateStr}.`);
+      return;
+    }
+
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Convenio_Payroll_Attendance_${activeDayPayrollDetails.day}_${timesheetMonthNames[activeDayPayrollDetails.month]}_${activeDayPayrollDetails.year}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // ================= INDIVIDUAL STAFF ATTENDANCE CALENDAR MODAL =================
@@ -3577,6 +3913,18 @@ export default function App() {
                   )}
                   {authRole === 'admin' && (
                     <button 
+                      id="tab-btn-payroll-cal"
+                      className={`admin-tab-btn ${adminTab === 'calendar' ? 'active' : ''}`}
+                      onClick={() => setAdminTab('calendar')}
+                    >
+                      <Calendar size={16} />
+                      <span className="tab-label-full">Payroll Calendar</span>
+                      <span className="tab-label-short">Calendar</span>
+                      <span className="tab-pill-counter" style={{ background: '#eff6ff', color: '#1d4ed8' }}>Live</span>
+                    </button>
+                  )}
+                  {authRole === 'admin' && (
+                    <button 
                       id="tab-btn-timesheet"
                       className={`admin-tab-btn ${adminTab === 'timesheet' ? 'active' : ''}`}
                       onClick={() => setAdminTab('timesheet')}
@@ -5104,6 +5452,146 @@ export default function App() {
                   <span>Showing {filteredTimesheetEmployees.length} Staff</span>
                   <span>•</span>
                   <span>{timesheetMonthNames[timesheetMonth]} {timesheetYear}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 6: PAYROLL ATTENDANCE CALENDAR (INTERACTIVE MONTHLY GRID & DAILY BRANCH DRILLDOWN) - ADMIN ONLY */}
+          {adminTab === 'calendar' && authRole === 'admin' && (
+            <div className="payroll-calendar-portal-view">
+              {/* Header Card */}
+              <div className="payroll-cal-header-card">
+                <div className="payroll-cal-header-left">
+                  <div className="payroll-cal-icon-box">
+                    <Calendar size={22} />
+                  </div>
+                  <div>
+                    <div className="payroll-cal-title-row">
+                      <h3>Payroll Attendance Calendar</h3>
+                      <span className="payroll-cal-badge-pill">Daily Branch Drilldown</span>
+                    </div>
+                    <p className="payroll-cal-subtitle">
+                      Click any date cell to open full branch-wise attendance counts and employee work hours for payroll calculation.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="payroll-cal-header-actions">
+                  <button 
+                    type="button" 
+                    className="btn-payroll-quick-nav"
+                    onClick={handleCurrentPayrollMonth}
+                    title="Jump to Current Month"
+                  >
+                    <Clock size={14} />
+                    <span>Today ({new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })})</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Month Navigation & Helper Bar */}
+              <div className="payroll-cal-controls-bar">
+                <div className="payroll-cal-nav-group">
+                  <button 
+                    type="button" 
+                    className="pcal-nav-arrow-btn" 
+                    onClick={handlePrevPayrollMonth}
+                    title="Previous Month"
+                    aria-label="Previous Month"
+                  >
+                    <ChevronLeft size={18} />
+                  </button>
+                  <span className="pcal-current-month-display">
+                    {timesheetMonthNames[payrollCalMonth]} {payrollCalYear}
+                  </span>
+                  <button 
+                    type="button" 
+                    className="pcal-nav-arrow-btn" 
+                    onClick={handleNextPayrollMonth}
+                    title="Next Month"
+                    aria-label="Next Month"
+                  >
+                    <ChevronRight size={18} />
+                  </button>
+                </div>
+
+                <div className="payroll-cal-hint-box">
+                  <span className="pcal-hint-dot"></span>
+                  <span>Tap any day cell to inspect branch breakdown & staff times</span>
+                </div>
+              </div>
+
+              {/* Calendar Grid Container */}
+              <div className="payroll-calendar-grid-card">
+                {/* Day of Week Header */}
+                <div className="payroll-cal-weekdays-row">
+                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((dayName, idx) => (
+                    <div key={dayName} className={`pcal-weekday-cell ${idx === 0 ? 'is-sunday' : ''}`}>
+                      <span>{dayName}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Day Cells Grid */}
+                <div className="payroll-cal-days-grid">
+                  {/* Empty leading padding cells */}
+                  {Array.from({ length: payrollFirstDayOfWeek }).map((_, idx) => (
+                    <div key={`empty-lead-${idx}`} className="pcal-day-cell is-empty"></div>
+                  ))}
+
+                  {/* Day cells 1..N */}
+                  {Array.from({ length: payrollDaysInMonth }, (_, i) => i + 1).map((day) => {
+                    const stats = getPayrollDayStats(day);
+                    const now = new Date();
+                    const isToday = (
+                      now.getDate() === day &&
+                      now.getMonth() === payrollCalMonth &&
+                      now.getFullYear() === payrollCalYear
+                    );
+                    const isSunday = new Date(payrollCalYear, payrollCalMonth, day).getDay() === 0;
+                    const hasAttendance = stats.distinctStaff > 0;
+
+                    return (
+                      <div 
+                        key={day}
+                        className={`pcal-day-cell ${isToday ? 'is-today' : ''} ${isSunday ? 'is-sunday' : ''} ${hasAttendance ? 'has-punches' : 'no-punches'}`}
+                        onClick={() => handleOpenPayrollDateModal(day)}
+                        role="button"
+                        tabIndex={0}
+                        title={`Click to view branch attendance breakdown for ${day} ${timesheetMonthNames[payrollCalMonth]}`}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleOpenPayrollDateModal(day); }}
+                      >
+                        <div className="pcal-cell-top">
+                          <span className={`pcal-day-number ${isToday ? 'today-pill' : ''}`}>{day}</span>
+                          {isToday && <span className="pcal-today-tag">Today</span>}
+                        </div>
+
+                        <div className="pcal-cell-content">
+                          {hasAttendance ? (
+                            <div className="pcal-stat-pills">
+                              <span className="pcal-present-chip" title={`${stats.distinctStaff} staff marked attendance`}>
+                                <Users size={11} />
+                                <strong>{stats.distinctStaff}</strong> staff
+                              </span>
+                              <span className="pcal-branch-chip" title={`Across ${stats.distinctBranches} stores`}>
+                                <Building2 size={11} />
+                                <span>{stats.distinctBranches} stores</span>
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="pcal-empty-day-hint">
+                              <span>-</span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="pcal-cell-footer">
+                          <span className="pcal-click-hint">Click details →</span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -6920,6 +7408,240 @@ export default function App() {
                 aria-label="Download Attendance PDF"
               >
                 <Download size={14} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= PAYROLL CALENDAR: DAILY ATTENDANCE & BRANCH BREAKDOWN MODAL ================= */}
+      {payrollSelectedDateModal && activeDayPayrollDetails && (
+        <div 
+          className="payroll-modal-overlay" 
+          onClick={handleClosePayrollDateModal}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="payroll-modal-title"
+        >
+          <div 
+            className="payroll-modal-card" 
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="payroll-modal-header">
+              <div className="payroll-modal-title-wrap">
+                <div className="payroll-modal-icon-badge">
+                  <Calendar size={20} />
+                </div>
+                <div>
+                  <h3 id="payroll-modal-title" className="payroll-modal-title">
+                    Attendance Breakdown &mdash; {activeDayPayrollDetails.dateStr}
+                  </h3>
+                  <p className="payroll-modal-subtitle">
+                    Payroll Attendance & Store-wise Employee Shift Summary
+                  </p>
+                </div>
+              </div>
+
+              <div className="payroll-modal-actions">
+                <button
+                  type="button"
+                  className="payroll-export-btn"
+                  onClick={handleExportDailyPayrollCSV}
+                  title="Export this day's attendance as CSV for payroll audit"
+                >
+                  <Download size={14} />
+                  <span>Export CSV</span>
+                </button>
+                <button
+                  type="button"
+                  className="modal-close-btn"
+                  onClick={handleClosePayrollDateModal}
+                  aria-label="Close modal"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Metric KPI Bar */}
+            <div className="payroll-modal-kpi-bar">
+              <div className="payroll-kpi-item">
+                <span className="payroll-kpi-label">Staff Present</span>
+                <span className="payroll-kpi-val text-emerald-600">
+                  <Users size={16} />
+                  <strong>{activeDayPayrollDetails.totalStaffPresent}</strong>
+                </span>
+              </div>
+              <div className="payroll-kpi-item">
+                <span className="payroll-kpi-label">Active Stores</span>
+                <span className="payroll-kpi-val text-blue-600">
+                  <Building2 size={16} />
+                  <strong>{activeDayPayrollDetails.branchesActiveCount}</strong>
+                  <span className="payroll-kpi-sub">/ {activeDayPayrollDetails.totalConfiguredBranches}</span>
+                </span>
+              </div>
+              <div className="payroll-kpi-item">
+                <span className="payroll-kpi-label">Total Punches</span>
+                <span className="payroll-kpi-val text-purple-600">
+                  <Clock size={16} />
+                  <strong>{activeDayPayrollDetails.totalPunches}</strong>
+                </span>
+              </div>
+            </div>
+
+            {/* Modal Branch List with Employee Expand/Collapse */}
+            <div className="payroll-modal-body">
+              {activeDayPayrollDetails.totalStaffPresent === 0 ? (
+                <div className="payroll-modal-empty">
+                  <AlertCircle size={32} className="text-gray-400" />
+                  <h4>No Attendance Recorded</h4>
+                  <p>No employee punch-in or punch-out records found for this date.</p>
+                </div>
+              ) : (
+                <div className="payroll-branches-accordion">
+                  <div className="payroll-section-legend">
+                    <span>Click on any branch card to inspect employee shift times & worked hours</span>
+                  </div>
+
+                  {activeDayPayrollDetails.branchGroups.map((bGroup) => {
+                    const isExpanded = payrollExpandedBranchId === bGroup.id;
+                    const count = bGroup.staffPresentList.length;
+
+                    return (
+                      <div 
+                        key={bGroup.id} 
+                        className={`payroll-branch-card ${isExpanded ? 'is-expanded' : ''} ${count > 0 ? 'has-staff' : 'is-idle'}`}
+                      >
+                        <div 
+                          className="payroll-branch-card-header"
+                          onClick={() => setPayrollExpandedBranchId(isExpanded ? null : bGroup.id)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              setPayrollExpandedBranchId(isExpanded ? null : bGroup.id);
+                            }
+                          }}
+                        >
+                          <div className="payroll-branch-header-info">
+                            <span className="payroll-branch-icon">
+                              <Building2 size={18} />
+                            </span>
+                            <div>
+                              <h4 className="payroll-branch-name">{bGroup.name}</h4>
+                              {bGroup.address && (
+                                <p className="payroll-branch-addr">{bGroup.address}</p>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="payroll-branch-header-right">
+                            <span className={`payroll-count-badge ${count > 0 ? 'active' : 'idle'}`}>
+                              <Users size={12} />
+                              <strong>{count}</strong> {count === 1 ? 'employee' : 'employees'}
+                            </span>
+                            <span className="payroll-accordion-chevron">
+                              {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Expanded Employee Detail List */}
+                        {isExpanded && (
+                          <div className="payroll-branch-detail-panel">
+                            {count === 0 ? (
+                              <div className="payroll-no-staff-at-branch">
+                                <span>No staff clocked in at this store on {activeDayPayrollDetails.dateStr}.</span>
+                              </div>
+                            ) : (
+                              <div className="payroll-staff-table-wrap">
+                                <table className="payroll-staff-table">
+                                  <thead>
+                                    <tr>
+                                      <th>Employee</th>
+                                      <th>Role</th>
+                                      <th>First In</th>
+                                      <th>Last Out</th>
+                                      <th>Duration</th>
+                                      <th>Status</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {bGroup.staffPresentList.map((st, sIdx) => {
+                                      const initial = (st.name || '?').charAt(0).toUpperCase();
+                                      return (
+                                        <tr key={sIdx} className="payroll-staff-row">
+                                          <td className="payroll-col-emp">
+                                            <div className="payroll-emp-cell">
+                                              <span className="payroll-emp-avatar">{initial}</span>
+                                              <span className="payroll-emp-name">{st.name}</span>
+                                            </div>
+                                          </td>
+                                          <td className="payroll-col-role">
+                                            <span className="payroll-role-pill">{st.role}</span>
+                                          </td>
+                                          <td className="payroll-col-time">
+                                            {st.firstIn ? (
+                                              <span className="payroll-time-pill in">
+                                                <LogIn size={11} />
+                                                <span>{st.firstIn}</span>
+                                              </span>
+                                            ) : (
+                                              <span className="payroll-time-dash">&mdash;</span>
+                                            )}
+                                          </td>
+                                          <td className="payroll-col-time">
+                                            {st.lastOut ? (
+                                              <span className="payroll-time-pill out">
+                                                <LogOut size={11} />
+                                                <span>{st.lastOut}</span>
+                                              </span>
+                                            ) : (
+                                              <span className="payroll-time-dash">&mdash;</span>
+                                            )}
+                                          </td>
+                                          <td className="payroll-col-duration">
+                                            <span className={`payroll-duration-pill ${st.duration?.active ? 'in-progress' : ''}`}>
+                                              {st.duration?.label || '-'}
+                                            </span>
+                                          </td>
+                                          <td className="payroll-col-status">
+                                            {st.hasMissed ? (
+                                              <span className="payroll-status-chip missed">Missed Out</span>
+                                            ) : st.duration?.active ? (
+                                              <span className="payroll-status-chip ongoing">In Progress</span>
+                                            ) : (
+                                              <span className="payroll-status-chip present">Present</span>
+                                            )}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="payroll-modal-footer">
+              <span className="payroll-footer-hint">
+                Calculated in real-time from store punch records for payroll & attendance reconciliation.
+              </span>
+              <button
+                type="button"
+                className="payroll-close-btn"
+                onClick={handleClosePayrollDateModal}
+              >
+                Close
               </button>
             </div>
           </div>
