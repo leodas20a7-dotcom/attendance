@@ -383,6 +383,9 @@ export default function App() {
   // Detailed Record Modal
   const [selectedRecord, setSelectedRecord] = useState(null);
 
+  // Early Checkout Confirmation Modal (< 9 Hours warning)
+  const [earlyCheckoutWarning, setEarlyCheckoutWarning] = useState(null);
+
   // Full-size Photo Viewer Modal
   const [viewingPhoto, setViewingPhoto] = useState(null);
 
@@ -1928,6 +1931,105 @@ export default function App() {
     return { label: 'Punched', hours: 0, minutes: 0 };
   };
 
+  // Helper to compute live/historical shift progress against 9-hour target for an employee on a given day
+  const getEmployeeShiftMetrics = useCallback((empName, dateStr, refPunches = null) => {
+    if (!empName) return null;
+    const targetName = empName.trim().toLowerCase();
+
+    // Source punches: passed directly or filtered from all records
+    const dayPunches = (refPunches || records).filter(r => {
+      const eName = (r.employeeName || r.name || '').trim().toLowerCase();
+      const matchName = eName === targetName || eName.includes(targetName) || targetName.includes(eName);
+      if (!matchName) return false;
+      if (dateStr) {
+        return r.date === dateStr;
+      }
+      return true;
+    }).sort((a, b) => {
+      const tsA = a.timestamp || (a.id && a.id.startsWith('REC-') ? Number(a.id.slice(4)) || 0 : 0);
+      const tsB = b.timestamp || (b.id && b.id.startsWith('REC-') ? Number(b.id.slice(4)) || 0 : 0);
+      return tsA - tsB;
+    });
+
+    if (dayPunches.length === 0) return null;
+
+    const firstIn = dayPunches.find(p => p.type === 'in');
+    if (!firstIn) return null;
+
+    const lastOut = [...dayPunches].reverse().find(p => p.type === 'out');
+    const isOngoing = !lastOut;
+
+    // Helper to get time in minutes
+    const getMinutes = (p) => {
+      if (p.timestamp && !isNaN(Number(p.timestamp))) {
+        const d = new Date(Number(p.timestamp));
+        return d.getHours() * 60 + d.getMinutes();
+      }
+      if (p.id && p.id.startsWith('REC-') && !p.id.startsWith('REC-AUTO')) {
+        const num = Number(p.id.slice(4));
+        if (!isNaN(num) && num > 1600000000000) {
+          const d = new Date(num);
+          return d.getHours() * 60 + d.getMinutes();
+        }
+      }
+      const tStr = p.shortTime || p.time;
+      if (tStr) {
+        const m = tStr.match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)/i);
+        if (m) {
+          let h = parseInt(m[1], 10);
+          const mins = parseInt(m[2], 10);
+          const ampm = m[3].toUpperCase();
+          if (ampm === 'PM' && h < 12) h += 12;
+          if (ampm === 'AM' && h === 12) h = 0;
+          return h * 60 + mins;
+        }
+      }
+      return null;
+    };
+
+    const inMin = getMinutes(firstIn);
+    if (inMin === null) return null;
+
+    let endMin;
+    if (lastOut) {
+      endMin = getMinutes(lastOut);
+      if (endMin === null || endMin < inMin) endMin = inMin;
+    } else {
+      const now = new Date();
+      endMin = now.getHours() * 60 + now.getMinutes();
+      if (endMin < inMin) endMin = inMin;
+    }
+
+    const elapsedMins = Math.max(0, endMin - inMin);
+    const workedHours = Math.floor(elapsedMins / 60);
+    const workedMinutes = elapsedMins % 60;
+
+    const TARGET_HOURS = 9;
+    const TARGET_MINUTES = TARGET_HOURS * 60; // 540 minutes
+    const isTargetMet = elapsedMins >= TARGET_MINUTES;
+    const remainingMins = Math.max(0, TARGET_MINUTES - elapsedMins);
+    const remainingHours = Math.floor(remainingMins / 60);
+    const remainingMinutesPart = remainingMins % 60;
+    const percentComplete = Math.min(100, Math.round((elapsedMins / TARGET_MINUTES) * 100));
+
+    return {
+      isOngoing,
+      elapsedMins,
+      workedHours,
+      workedMinutes,
+      workedLabel: `${workedHours}h ${workedMinutes}m`,
+      remainingHours,
+      remainingMinutesPart,
+      remainingLabel: remainingHours > 0 
+        ? `${remainingHours}h ${remainingMinutesPart}m` 
+        : `${remainingMinutesPart}m`,
+      isTargetMet,
+      percentComplete,
+      firstInTime: firstIn.shortTime || firstIn.time,
+      lastOutTime: lastOut ? (lastOut.shortTime || lastOut.time) : null
+    };
+  }, [records]);
+
   // Open Day Drilldown Modal
   const handleOpenPayrollDateModal = (day) => {
     const d = new Date(payrollCalYear, payrollCalMonth, day);
@@ -2742,6 +2844,24 @@ export default function App() {
     if (actionType === 'in' && latestTodayRecord?.type === 'in') {
       setFormValidationMsg(`${empName} is already checked in today at ${formatTo12HourTime(latestTodayRecord.shortTime || latestTodayRecord.time)}. Tap Check Out when leaving.`);
       return;
+    }
+
+    // Smart Shift Check: Early Checkout Confirmation if worked less than 9 hours
+    if (actionType === 'out' && latestTodayRecord?.type === 'in') {
+      const shiftMetrics = getEmployeeShiftMetrics(empName, formatDate(new Date()));
+      if (shiftMetrics && !shiftMetrics.isTargetMet) {
+        // Trigger smart confirmation modal instead of proceeding silently
+        setEarlyCheckoutWarning({
+          employeeName: empName,
+          shiftMetrics,
+          onConfirm: () => {
+            setEarlyCheckoutWarning(null);
+            setFormValidationMsg('');
+            startCamera('out');
+          }
+        });
+        return;
+      }
     }
 
     setFormValidationMsg('');
@@ -3566,38 +3686,67 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Smart Status Detection Banner */}
-                {activeFormEmpName && (
-                  <div className={`smart-status-banner status-${latestTodayRecord?.type || 'none'}`}>
-                    <div className="status-banner-left">
-                      <span className={`status-indicator-dot dot-${latestTodayRecord?.type || 'none'}`}></span>
-                      <div className="status-text-group">
-                        <div className="status-primary-line">
-                          {latestTodayRecord?.type === 'in' ? (
-                            <>
-                              <strong className="status-title-in">Checked In Today</strong>
-                              <span className="status-time-chip">{formatTo12HourTime(latestTodayRecord.shortTime || latestTodayRecord.time)}</span>
-                            </>
-                          ) : latestTodayRecord?.type === 'out' ? (
-                            <>
-                              <strong className="status-title-out">Checked Out Today</strong>
-                              <span className="status-time-chip">{formatTo12HourTime(latestTodayRecord.shortTime || latestTodayRecord.time)}</span>
-                            </>
-                          ) : (
-                            <strong className="status-title-none">Not Checked In Today</strong>
-                          )}
+                {/* Smart Status Detection Banner & 9-Hour Work Duration Tracker */}
+                {activeFormEmpName && (() => {
+                  const shiftMetrics = latestTodayRecord?.type === 'in'
+                    ? getEmployeeShiftMetrics(activeFormEmpName, formatDate(new Date()))
+                    : null;
+
+                  return (
+                    <div className={`smart-status-banner status-${latestTodayRecord?.type || 'none'}`}>
+                      <div className="status-banner-left">
+                        <span className={`status-indicator-dot dot-${latestTodayRecord?.type || 'none'}`}></span>
+                        <div className="status-text-group">
+                          <div className="status-primary-line">
+                            {latestTodayRecord?.type === 'in' ? (
+                              <>
+                                <strong className="status-title-in">Checked In Today</strong>
+                                <span className="status-time-chip">{formatTo12HourTime(latestTodayRecord.shortTime || latestTodayRecord.time)}</span>
+                              </>
+                            ) : latestTodayRecord?.type === 'out' ? (
+                              <>
+                                <strong className="status-title-out">Checked Out Today</strong>
+                                <span className="status-time-chip">{formatTo12HourTime(latestTodayRecord.shortTime || latestTodayRecord.time)}</span>
+                              </>
+                            ) : (
+                              <strong className="status-title-none">Not Checked In Today</strong>
+                            )}
+                          </div>
+                          <p className="status-subtext">
+                            {latestTodayRecord?.type === 'in' 
+                              ? 'Shift active • Tap Check Out when your shift ends'
+                              : latestTodayRecord?.type === 'out'
+                              ? 'Shift complete • Ready if starting a new shift'
+                              : 'Tap Check In to begin today\'s shift'}
+                          </p>
                         </div>
-                        <p className="status-subtext">
-                          {latestTodayRecord?.type === 'in' 
-                            ? 'Shift active • Tap Check Out when your shift ends'
-                            : latestTodayRecord?.type === 'out'
-                            ? 'Shift complete • Ready if starting a new shift'
-                            : 'Tap Check In to begin today\'s shift'}
-                        </p>
                       </div>
+
+                      {/* Active Shift Duration & 9h Progress Badge */}
+                      {shiftMetrics && (
+                        <div className="smart-shift-duration-tracker">
+                          <div className="shift-tracker-top">
+                            <span className="shift-tracker-badge">
+                              <Clock size={12} />
+                              <span>Worked: <strong>{shiftMetrics.workedLabel}</strong></span>
+                            </span>
+                            <span className={`shift-target-badge ${shiftMetrics.isTargetMet ? 'target-met' : 'target-pending'}`}>
+                              {shiftMetrics.isTargetMet 
+                                ? '✓ 9h Target Met' 
+                                : `${shiftMetrics.remainingLabel} left for 9h`}
+                            </span>
+                          </div>
+                          <div className="shift-progress-track">
+                            <div 
+                              className={`shift-progress-bar ${shiftMetrics.isTargetMet ? 'is-complete' : ''}`}
+                              style={{ width: `${shiftMetrics.percentComplete}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* Validation Alert */}
                 {formValidationMsg && (
@@ -6782,7 +6931,29 @@ export default function App() {
                   )}
                 </div>
                 <div className="receipt-person-details">
-                  <h3 className="receipt-person-name">{selectedRecord.employeeName}</h3>
+                  <div className="receipt-person-name-row">
+                    <h3 className="receipt-person-name">{selectedRecord.employeeName}</h3>
+                    {(() => {
+                      const shift = getEmployeeShiftMetrics(selectedRecord.employeeName, selectedRecord.date);
+                      if (!shift) return null;
+                      return (
+                        <span 
+                          className={`receipt-shift-pill ${shift.isTargetMet ? 'shift-completed' : shift.isOngoing ? 'shift-ongoing' : 'shift-early'}`}
+                          title={shift.isTargetMet 
+                            ? `Completed full 9-hour shift (${shift.workedLabel})` 
+                            : shift.isOngoing 
+                            ? `Shift active: ${shift.workedLabel} worked • ${shift.remainingLabel} left for 9h` 
+                            : `Left early: ${shift.workedLabel} worked • ${shift.remainingLabel} short of 9h`}
+                        >
+                          <Clock size={11} />
+                          <span>{shift.workedLabel}</span>
+                          <span className="receipt-shift-subtag">
+                            {shift.isTargetMet ? '✓ 9h Met' : shift.isOngoing ? `${shift.remainingLabel} left` : 'Short'}
+                          </span>
+                        </span>
+                      );
+                    })()}
+                  </div>
                   <div className="receipt-person-meta">
                     <span className="receipt-role-badge">{selectedRecord.employeeRole || 'Staff'}</span>
                     <span className="receipt-bullet">•</span>
@@ -7772,6 +7943,101 @@ export default function App() {
                 onClick={() => setShowInstallGuideModal(false)}
               >
                 Got It
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= SMART EARLY CHECKOUT CONFIRMATION MODAL (< 9 HOURS) ================= */}
+      {earlyCheckoutWarning && (
+        <div 
+          className="early-checkout-modal-overlay" 
+          onClick={() => setEarlyCheckoutWarning(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="early-checkout-title"
+        >
+          <div 
+            className="early-checkout-modal-card" 
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="early-checkout-header">
+              <div className="early-checkout-icon-wrap">
+                <Clock size={24} />
+              </div>
+              <button 
+                type="button" 
+                className="modal-close-btn" 
+                onClick={() => setEarlyCheckoutWarning(null)}
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="early-checkout-body">
+              <span className="early-checkout-tag">9-Hour Shift Target</span>
+              <h3 id="early-checkout-title" className="early-checkout-title">
+                Check Out Early?
+              </h3>
+              <p className="early-checkout-desc">
+                Hello <strong>{earlyCheckoutWarning.employeeName}</strong>, standard daily shift is <strong>9 hours</strong>.
+              </p>
+
+              {/* Progress Summary Card */}
+              <div className="early-checkout-stats-box">
+                <div className="stats-row-metric">
+                  <div className="metric-box worked">
+                    <span className="metric-lbl">Worked Today</span>
+                    <strong className="metric-num">{earlyCheckoutWarning.shiftMetrics.workedLabel}</strong>
+                  </div>
+                  <div className="metric-divider"></div>
+                  <div className="metric-box remaining">
+                    <span className="metric-lbl">Remaining</span>
+                    <strong className="metric-num text-amber-600">
+                      {earlyCheckoutWarning.shiftMetrics.remainingLabel}
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="early-shift-progress-wrap">
+                  <div className="progress-labels">
+                    <span>{earlyCheckoutWarning.shiftMetrics.percentComplete}% of 9h completed</span>
+                    <span>Target: 9h</span>
+                  </div>
+                  <div className="early-progress-track">
+                    <div 
+                      className="early-progress-bar"
+                      style={{ width: `${earlyCheckoutWarning.shiftMetrics.percentComplete}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <p className="early-checkout-subnote">
+                Are you sure you want to clock out now, or would you like to continue working?
+              </p>
+            </div>
+
+            <div className="early-checkout-actions">
+              <button 
+                type="button" 
+                className="btn-continue-work"
+                onClick={() => setEarlyCheckoutWarning(null)}
+              >
+                <span>Continue Working</span>
+              </button>
+              <button 
+                type="button" 
+                className="btn-confirm-early-out"
+                onClick={() => {
+                  if (earlyCheckoutWarning.onConfirm) {
+                    earlyCheckoutWarning.onConfirm();
+                  }
+                }}
+              >
+                <span>Check Out Early</span>
               </button>
             </div>
           </div>
