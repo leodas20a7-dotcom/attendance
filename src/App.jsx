@@ -5468,8 +5468,8 @@ export default function App() {
                   </div>
                   <div>
                     <div className="payroll-cal-title-row">
-                      <h3>Payroll Attendance Calendar</h3>
-                      <span className="payroll-cal-badge-pill">Daily Branch Drilldown</span>
+                      <h3 className="payroll-cal-title">Payroll Attendance Calendar</h3>
+                      <span className="payroll-live-pill">Live</span>
                     </div>
                     <p className="payroll-cal-subtitle">
                       Click any date cell to open full branch-wise attendance counts and employee work hours for payroll calculation.
@@ -5492,42 +5492,50 @@ export default function App() {
 
               {/* Month Navigation & Helper Bar */}
               <div className="payroll-cal-controls-bar">
-                <div className="payroll-cal-nav-group">
+                <div className="payroll-month-nav-group">
                   <button 
                     type="button" 
-                    className="pcal-nav-arrow-btn" 
+                    className="payroll-nav-arrow-btn" 
                     onClick={handlePrevPayrollMonth}
                     title="Previous Month"
                     aria-label="Previous Month"
                   >
                     <ChevronLeft size={18} />
                   </button>
-                  <span className="pcal-current-month-display">
+                  <span className="payroll-month-label">
                     {timesheetMonthNames[payrollCalMonth]} {payrollCalYear}
                   </span>
                   <button 
                     type="button" 
-                    className="pcal-nav-arrow-btn" 
+                    className="payroll-nav-arrow-btn" 
                     onClick={handleNextPayrollMonth}
                     title="Next Month"
                     aria-label="Next Month"
                   >
                     <ChevronRight size={18} />
                   </button>
+                  <button
+                    type="button"
+                    className="payroll-today-jump-btn"
+                    onClick={handleCurrentPayrollMonth}
+                    title="Jump to current month"
+                  >
+                    Today
+                  </button>
                 </div>
 
-                <div className="payroll-cal-hint-box">
+                <div className="payroll-cal-tip">
                   <span className="pcal-hint-dot"></span>
                   <span>Tap any day cell to inspect branch breakdown & staff times</span>
                 </div>
               </div>
 
               {/* Calendar Grid Container */}
-              <div className="payroll-calendar-grid-card">
+              <div className="payroll-cal-container-card">
                 {/* Day of Week Header */}
                 <div className="payroll-cal-weekdays-row">
                   {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((dayName, idx) => (
-                    <div key={dayName} className={`pcal-weekday-cell ${idx === 0 ? 'is-sunday' : ''}`}>
+                    <div key={dayName} className={`payroll-weekday-cell ${idx === 0 ? 'is-sun' : ''}`}>
                       <span>{dayName}</span>
                     </div>
                   ))}
