@@ -48,6 +48,7 @@ import {
   Calendar,
   CalendarDays,
   ChevronLeft,
+  ChevronUp,
   ChevronsLeft,
   ChevronsRight,
   Megaphone,
@@ -564,11 +565,7 @@ export default function App() {
 
           if (cloudRecords !== null) {
             setRecords(cloudRecords);
-            try {
-              localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(cloudRecords));
-            } catch (e) {
-              console.warn('Failed to cache cloud records:', e);
-            }
+            safeCacheRecords(cloudRecords);
           }
 
           if (cloudManagers && Array.isArray(cloudManagers) && cloudManagers.length > 0) {
@@ -598,6 +595,25 @@ export default function App() {
     setTimeout(() => setCopiedSql(false), 2500);
   };
 
+  // Helper to safely cache records into localStorage without blowing quota (e.g. photos)
+  const safeCacheRecords = (recs) => {
+    if (!recs || !Array.isArray(recs)) return;
+    try {
+      localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(recs));
+    } catch (e) {
+      // If photo data URLs exceed 5MB quota, strip heavy photo strings for offline cache
+      try {
+        const lightweight = recs.slice(0, 150).map(r => ({
+          ...r,
+          photo: r.photo && r.photo.length > 200 ? undefined : r.photo
+        }));
+        localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(lightweight));
+      } catch (innerErr) {
+        console.warn('LocalStorage quota limit reached, skipping offline records cache.');
+      }
+    }
+  };
+
   // Sync circulars to localStorage
   useEffect(() => {
     saveStoredCirculars(circulars);
@@ -608,13 +624,9 @@ export default function App() {
     saveStoredBranches(branches);
   }, [branches]);
 
-  // Sync attendance records to localStorage
+  // Sync attendance records to localStorage safely
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(records));
-    } catch (e) {
-      console.error('Error saving records', e);
-    }
+    safeCacheRecords(records);
   }, [records]);
 
   // Save selected branch and employee to localStorage
