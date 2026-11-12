@@ -1521,11 +1521,12 @@ export default function App() {
     return d.toLocaleDateString('en-US', { weekday: 'narrow' });
   }, [timesheetYear, timesheetMonth]);
 
-  // Master list of all staff across branches and records
+  // Master list of all staff across branches (STRICTLY ACTIVE EMPLOYEES ONLY - excludes deleted employees)
   const allTimesheetEmployees = useMemo(() => {
     const list = [];
     const seen = new Set();
 
+    // Only include currently active, non-deleted employees from configured branches
     branches.forEach(branch => {
       if (Array.isArray(branch.employees)) {
         branch.employees.forEach(emp => {
@@ -1544,22 +1545,8 @@ export default function App() {
       }
     });
 
-    records.forEach(r => {
-      const empName = (r.employeeName || r.name || '').trim();
-      if (empName && !seen.has(empName.toLowerCase())) {
-        seen.add(empName.toLowerCase());
-        list.push({
-          id: `rec-emp-${empName.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
-          name: empName,
-          role: r.employeeRole || 'Staff',
-          branchId: 'other',
-          branchName: r.branchName || 'Convenio Mart'
-        });
-      }
-    });
-
     return list.sort((a, b) => a.name.localeCompare(b.name));
-  }, [branches, records]);
+  }, [branches]);
 
   // Filtered employees for timesheet grid
   const filteredTimesheetEmployees = useMemo(() => {
@@ -1878,7 +1865,20 @@ export default function App() {
     setPayrollCalMonth(now.getMonth());
   };
 
+  // Set of lowercase active employee names (excludes deleted employees)
+  const activeEmployeeNamesSet = useMemo(() => {
+    const set = new Set();
+    branches.forEach(b => {
+      (b.employees || []).forEach(emp => {
+        const name = (typeof emp === 'string' ? emp : emp.name || '').trim().toLowerCase();
+        if (name) set.add(name);
+      });
+    });
+    return set;
+  }, [branches]);
+
   // Map of all punches for the active payroll calendar month, indexed by day (1..31)
+  // Strictly filters out records belonging to deleted employees
   const payrollMonthDaysMap = useMemo(() => {
     const dayMap = {};
     for (let d = 1; d <= payrollDaysInMonth; d++) {
@@ -1886,6 +1886,10 @@ export default function App() {
     }
 
     records.forEach(r => {
+      const empName = (r.employeeName || r.name || '').trim().toLowerCase();
+      // Exclude deleted employees
+      if (!empName || !activeEmployeeNamesSet.has(empName)) return;
+
       const comp = getRecordDateComponents(r);
       if (!comp) return;
       if (comp.year === payrollCalYear && comp.month === payrollCalMonth) {
@@ -1896,7 +1900,7 @@ export default function App() {
     });
 
     return dayMap;
-  }, [records, payrollCalYear, payrollCalMonth, payrollDaysInMonth, getRecordDateComponents]);
+  }, [records, payrollCalYear, payrollCalMonth, payrollDaysInMonth, getRecordDateComponents, activeEmployeeNamesSet]);
 
   // Aggregate day statistics for each cell in the calendar grid
   const getPayrollDayStats = useCallback((day) => {
