@@ -79,7 +79,8 @@ export function initPwaManager({ onUpdateAvailable, onInstallableChange } = {}) 
 
   // 3. Proactive Version Checking against version.json in production
   if (!IS_DEV) {
-    setTimeout(() => checkForAppUpdate(), 4000);
+    // Fast initial check 1.5s after launch
+    setTimeout(() => checkForAppUpdate(), 1500);
 
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
@@ -88,9 +89,10 @@ export function initPwaManager({ onUpdateAvailable, onInstallableChange } = {}) 
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
+    // Fast background check every 60 seconds (down from 180s)
     const intervalId = setInterval(() => {
       checkForAppUpdate();
-    }, 180000);
+    }, 60000);
 
     return () => {
       clearInterval(intervalId);
@@ -123,7 +125,7 @@ export function dismissUpdateNotification() {
 
 // Check against server version.json
 export async function checkForAppUpdate() {
-  if (IS_DEV || isChecking || isUpdateAvailable) return false;
+  if (IS_DEV || isChecking) return false;
   isChecking = true;
 
   try {
@@ -149,10 +151,33 @@ export async function checkForAppUpdate() {
         data &&
         data.version &&
         data.version !== 'dev' &&
-        data.version !== CURRENT_APP_VERSION &&
-        sessionStorage.getItem('convenio_dismissed_version') !== data.version
+        data.version !== CURRENT_APP_VERSION
       ) {
         markUpdateAvailable();
+
+        // Check if user is actively in the middle of a selfie punch
+        const isCapturing = Boolean(
+          document.querySelector('.camera-view') || 
+          document.querySelector('video') || 
+          window.__CONVENIO_CAMERA_BUSY__
+        );
+
+        if (!isCapturing) {
+          // Immediately apply update silently without waiting for user action
+          console.log(`[PWA] Newer version detected (${data.version}). Applying automatic update...`);
+          setTimeout(() => {
+            applyImmediateUpdate();
+          }, 600);
+        } else {
+          // If camera is open, poll and reload as soon as camera turns off
+          const cameraCheckInterval = setInterval(() => {
+            if (!document.querySelector('.camera-view') && !window.__CONVENIO_CAMERA_BUSY__) {
+              clearInterval(cameraCheckInterval);
+              applyImmediateUpdate();
+            }
+          }, 3000);
+        }
+
         return true;
       }
     }

@@ -2965,6 +2965,8 @@ export default function App() {
 
   // Keep live stream connected to the video element whenever active
   useEffect(() => {
+    // Sync camera busy flag to window so background updates never reload mid-punch
+    window.__CONVENIO_CAMERA_BUSY__ = cameraActive;
     if (cameraActive && streamRef.current && videoRef.current && !capturedPhoto) {
       if (videoRef.current.srcObject !== streamRef.current) {
         videoRef.current.srcObject = streamRef.current;
