@@ -559,6 +559,7 @@ export default function App() {
         employeeName: activeEmp,
         branchName: activeBranch,
         appVersion: CURRENT_APP_VERSION,
+        currentAppVersion: CURRENT_APP_VERSION,
         deviceSummary: summary,
         platform: platformDesc,
         isStandalone: standalone,

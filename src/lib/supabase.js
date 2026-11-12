@@ -493,21 +493,21 @@ export async function removeCircularFromSupabase(circularId) {
 export async function syncDeviceTelemetryToSupabase(telemetry) {
   try {
     if (!telemetry || !telemetry.id) return;
+    const isLatest = telemetry.appVersion && telemetry.currentAppVersion 
+      ? telemetry.appVersion === telemetry.currentAppVersion 
+      : true;
+
     await supabase.from('device_telemetry').upsert({
       id: telemetry.id,
       employee_name: telemetry.employeeName || 'Kiosk Device',
       branch_name: telemetry.branchName || 'Convenio Mart',
       app_version: telemetry.appVersion || 'prod',
       device_summary: telemetry.deviceSummary || 'Web Device',
-      platform: telemetry.platform || 'unknown',
-      is_standalone: Boolean(telemetry.isStandalone),
+      is_latest: isLatest,
       action: telemetry.action || 'launch',
-      last_seen_date: telemetry.date || new Date().toISOString().split('T')[0],
-      last_seen_time: telemetry.time || new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       updated_at: new Date().toISOString()
     });
   } catch (err) {
-    // Graceful fallback: table might not be created in Supabase yet
     console.warn('Device telemetry sync note:', err.message || err);
   }
 }
@@ -524,19 +524,38 @@ export async function fetchDeviceTelemetryFromSupabase() {
 
     if (error || !data) return null;
 
-    return data.map(d => ({
-      id: d.id,
-      employeeName: d.employee_name,
-      branchName: d.branch_name,
-      appVersion: d.app_version,
-      deviceSummary: d.device_summary,
-      platform: d.platform,
-      isStandalone: d.is_standalone,
-      action: d.action,
-      lastSeenDate: d.last_seen_date,
-      lastSeenTime: d.last_seen_time,
-      updatedAt: d.updated_at
-    }));
+    return data.map(d => {
+      // Derive readable date and time from updated_at timestamp
+      let dateStr = d.last_seen_date || '';
+      let timeStr = d.last_seen_time || '';
+      if (d.updated_at) {
+        try {
+          const dt = new Date(d.updated_at);
+          if (!dateStr) {
+            dateStr = dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+          }
+          if (!timeStr) {
+            timeStr = dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+          }
+        } catch {
+          // Keep fallbacks
+        }
+      }
+
+      return {
+        id: d.id,
+        employeeName: d.employee_name,
+        branchName: d.branch_name,
+        appVersion: d.app_version,
+        deviceSummary: d.device_summary,
+        platform: d.platform || (d.device_summary?.includes('Android') ? 'Android' : d.device_summary?.includes('iOS') ? 'iOS' : 'Desktop'),
+        isLatest: d.is_latest,
+        action: d.action,
+        lastSeenDate: dateStr,
+        lastSeenTime: timeStr,
+        updatedAt: d.updated_at
+      };
+    });
   } catch (err) {
     console.warn('Error fetching device telemetry:', err);
     return null;
