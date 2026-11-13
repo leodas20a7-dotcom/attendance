@@ -2207,6 +2207,7 @@ export default function App() {
         const lastOut = [...sorted].reverse().find(p => p.type === 'out');
         const hasMissed = sorted.some(p => isMissedCheckoutRecord(p));
         const duration = calculateShiftDuration(sorted);
+        const hasNoIn = !firstIn && Boolean(lastOut);
 
         return {
           name: staff.name,
@@ -2215,6 +2216,7 @@ export default function App() {
           firstIn: firstIn ? (firstIn.shortTime || firstIn.time) : null,
           lastOut: lastOut ? (lastOut.shortTime || lastOut.time) : null,
           hasMissed,
+          hasNoIn,
           duration
         };
       });
@@ -2920,18 +2922,15 @@ export default function App() {
 
     const empName = currentFormEmployee.name;
 
-    // Guardrail: Confirmation if checking out without active check in
-    if (actionType === 'out' && latestTodayRecord?.type !== 'in') {
+    // Guardrail: Strict checkout check - cannot Check Out without an active Check In today
+    if (actionType === 'out') {
       if (!latestTodayRecord) {
-        const proceedWithoutCheckIn = window.confirm(
-          `No morning Check In was found for ${empName} today. Do you still want to record your Check Out now?`
-        );
-        if (!proceedWithoutCheckIn) return;
-      } else if (latestTodayRecord.type === 'out') {
-        const proceedDoubleCheckOut = window.confirm(
-          `${empName} was already checked out today at ${formatTo12HourTime(latestTodayRecord.shortTime || latestTodayRecord.time)}. Do you want to record another Check Out?`
-        );
-        if (!proceedDoubleCheckOut) return;
+        setFormValidationMsg(`Cannot Check Out: No morning Check In recorded for ${empName} today. Please tap Check In first.`);
+        return;
+      }
+      if (latestTodayRecord.type === 'out') {
+        setFormValidationMsg(`${empName} is already checked out today at ${formatTo12HourTime(latestTodayRecord.shortTime || latestTodayRecord.time)}.`);
+        return;
       }
     }
 
@@ -3892,17 +3891,17 @@ export default function App() {
                     id="btn-check-out"
                     className={`clean-btn clean-btn-out ${latestTodayRecord?.type === 'in' ? 'btn-highlighted-action' : ''}`}
                     onClick={() => handleActionClick('out')}
-                    disabled={!currentFormEmployee || latestTodayRecord?.type === 'out'}
+                    disabled={!currentFormEmployee || latestTodayRecord?.type !== 'in'}
                     title={
                       !currentFormEmployee
                         ? (typedEmpName.trim() && matchedCompanyEmployees.length > 1
                             ? 'Please select which employee you are before checking out'
                             : 'Select or verify your registered name from employee list to check out')
+                        : !latestTodayRecord
+                        ? 'Cannot check out without checking in first'
                         : latestTodayRecord?.type === 'out'
                         ? `${activeFormEmpName} is already checked out today`
-                        : latestTodayRecord?.type === 'in'
-                        ? 'Record Check Out (Shift active)'
-                        : 'Record Check Out'
+                        : 'Record Check Out (Shift active)'
                     }
                   >
                     <LogOut size={18} />
@@ -7924,7 +7923,9 @@ export default function App() {
                                             </span>
                                           </td>
                                           <td className="payroll-col-status">
-                                            {st.hasMissed ? (
+                                            {st.hasNoIn ? (
+                                              <span className="payroll-status-chip missed" title="No morning Check In recorded">No Check In</span>
+                                            ) : st.hasMissed ? (
                                               <span className="payroll-status-chip missed">Missed Out</span>
                                             ) : st.duration?.active ? (
                                               <span className="payroll-status-chip ongoing">In Progress</span>
