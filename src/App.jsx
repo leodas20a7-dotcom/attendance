@@ -711,6 +711,42 @@ export default function App() {
     safeCacheRecords(records);
   }, [records]);
 
+  // Retry any offline/failed attendance punches when connection is available
+  useEffect(() => {
+    const syncPendingAttendance = async () => {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+      try {
+        const raw = localStorage.getItem('convenio_pending_attendance_sync');
+        if (!raw) return;
+        const pending = JSON.parse(raw);
+        if (!Array.isArray(pending) || pending.length === 0) return;
+
+        const remaining = [];
+        for (const rec of pending) {
+          const ok = await saveAttendanceToSupabase(rec);
+          if (!ok) {
+            remaining.push(rec);
+          }
+        }
+        if (remaining.length > 0) {
+          localStorage.setItem('convenio_pending_attendance_sync', JSON.stringify(remaining));
+        } else {
+          localStorage.removeItem('convenio_pending_attendance_sync');
+        }
+      } catch (err) {
+        console.warn('Pending attendance sync check error:', err);
+      }
+    };
+
+    syncPendingAttendance();
+    window.addEventListener('online', syncPendingAttendance);
+    const retryTimer = setInterval(syncPendingAttendance, 60000);
+    return () => {
+      window.removeEventListener('online', syncPendingAttendance);
+      clearInterval(retryTimer);
+    };
+  }, []);
+
   // Save selected branch and employee to localStorage
   useEffect(() => {
     if (selectedBranchId) {
@@ -1053,7 +1089,7 @@ export default function App() {
   // Helper to reliably check if a record was recorded today across any browser locale / format
   const isRecordToday = useCallback((r) => {
     if (!r) return false;
-    const now = new Date();
+    const now = getServerNow();
     const curYear = now.getFullYear();
     const curMonth = now.getMonth();
     const curDate = now.getDate();
@@ -1151,10 +1187,15 @@ export default function App() {
           );
 
           if (!alreadyExists) {
+            const dObj = new Date(lastPunch.date || date);
+            dObj.setHours(23, 30, 0, 0);
+            const autoTimestamp = !isNaN(dObj.getTime()) ? dObj.getTime() : (lastPunch.timestamp || Date.now()) + 3600000;
+            const autoCreatedAt = !isNaN(dObj.getTime()) ? dObj.toISOString() : new Date().toISOString();
+
             const autoRecord = {
               id: autoId,
-              timestamp: (lastPunch.timestamp || Date.now()) + 3600000,
-              created_at: new Date(lastPunch.date || date).toISOString(),
+              timestamp: autoTimestamp,
+              created_at: autoCreatedAt,
               employeeName: empName,
               employeeRole: lastPunch.employeeRole || 'Staff',
               branchName: lastPunch.branchName || 'Convenio Mart',
@@ -2411,6 +2452,13 @@ export default function App() {
           punches: dayPunches
         };
       }
+      if (!hasIn && hasOut) {
+        return {
+          status: 'leave',
+          label: 'No Check In (Checked Out only)',
+          punches: dayPunches
+        };
+      }
       if (hasIn || hasOut) {
         return {
           status: 'present', // matches green Present
@@ -3139,105 +3187,142 @@ export default function App() {
 
   // Submit attendance with live selfie & push with map location
   const submitAttendance = async () => {
-    if (!capturedPhoto) return;
+    if (!capturedPhoto || isProcessing) return;
     setIsProcessing(true);
 
-    // Safeguard: compress photo before storing in state, localStorage, or Supabase
-    const finalPhoto = await compressImageDataUrl(capturedPhoto, 480, 0.72);
+    try {
+      // Safeguard: compress photo before storing in state, localStorage, or Supabase
+      const finalPhoto = await compressImageDataUrl(capturedPhoto, 480, 0.72);
 
-    // Use server-authoritative time (prevents phone clock tampering)
-    const now = getServerNow();
-    const formattedDate = now.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
-    const formattedTime = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
-    const shortTime = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+      // Use server-authoritative time (prevents phone clock tampering)
+      const now = getServerNow();
+      const formattedDate = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      const formattedTime = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+      const shortTime = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 
-    if (!currentFormEmployee) {
-      setFormValidationMsg('Only registered employees in our employee list can record attendance.');
-      setIsProcessing(false);
-      return;
-    }
+      if (!currentFormEmployee) {
+        setFormValidationMsg('Only registered employees in our employee list can record attendance.');
+        setIsProcessing(false);
+        return;
+      }
 
-    const activeEmpName = currentFormEmployee.name;
-    const activeBranchName = currentFormBranch ? currentFormBranch.name : 'Main Mart';
-    const activeEmpRole = currentFormEmployee?.role || 'Staff';
+      const activeEmpName = currentFormEmployee.name;
+      const activeBranchName = currentFormBranch ? currentFormBranch.name : 'Main Mart';
+      const activeEmpRole = currentFormEmployee?.role || 'Staff';
 
-    const finishRecord = (locationData) => {
-      const isGeofenceOk = geoStatus === 'in_range';
-      const verifiedDistance = geoData?.distanceMeters != null ? geoData.distanceMeters : null;
+      const defaultLat = geoData?.userLat != null ? Number(geoData.userLat.toFixed(6)) : null;
+      const defaultLng = geoData?.userLng != null ? Number(geoData.userLng.toFixed(6)) : null;
+      const defaultPlace = activeBranchName ? `${activeBranchName} (Geofence Verified)` : 'Live GPS Verified';
 
-      const newRecord = {
-        id: 'REC-' + now.getTime(),
-        timestamp: now.getTime(),
-        created_at: now.toISOString(),
-        employeeName: activeEmpName,
-        employeeRole: activeEmpRole,
-        branchName: activeBranchName,
-        type: currentActionType,
-        date: formattedDate,
-        time: formattedTime,
-        shortTime,
-        photo: finalPhoto || capturedPhoto,
-        geofenceVerified: isGeofenceOk,
-        distanceMeters: verifiedDistance,
-        location: locationData
-      };
+      const finishRecord = (locationData) => {
+        const isGeofenceOk = geoStatus === 'in_range';
+        const verifiedDistance = geoData?.distanceMeters != null ? geoData.distanceMeters : null;
 
-      setRecords((prev) => [newRecord, ...prev]);
-      saveAttendanceToSupabase(newRecord);
-      setIsProcessing(false);
-      stopCamera();
+        const newRecord = {
+          id: 'REC-' + now.getTime(),
+          timestamp: now.getTime(),
+          created_at: now.toISOString(),
+          employeeName: activeEmpName,
+          employeeRole: activeEmpRole,
+          branchName: activeBranchName,
+          type: currentActionType,
+          date: formattedDate,
+          time: formattedTime,
+          shortTime,
+          photo: finalPhoto || capturedPhoto,
+          geofenceVerified: isGeofenceOk,
+          distanceMeters: verifiedDistance,
+          location: locationData
+        };
 
-      setSuccessData({
-        type: currentActionType,
-        shortTime,
-        formattedDate,
-        lat: locationData.lat,
-        lng: locationData.lng,
-        placeName: locationData.placeName,
-        mapUrl: locationData.lat ? `https://www.google.com/maps?q=${locationData.lat},${locationData.lng}` : null,
-        photo: finalPhoto || capturedPhoto,
-        name: activeEmpName,
-        branch: activeBranchName,
-        role: activeEmpRole,
-        geofenceVerified: isGeofenceOk,
-        distanceMeters: verifiedDistance
-      });
-    };
-
-    if ('geolocation' in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          const lat = position.coords.latitude;
-          const lng = position.coords.longitude;
-          let placeName = '';
-
-          try {
-            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`, {
-              headers: { 'Accept-Language': 'en' }
-            });
-            if (res.ok) {
-              const data = await res.json();
-              if (data && data.display_name) {
-                placeName = data.display_name.split(',').slice(0, 3).join(', ').trim();
+        setRecords((prev) => [newRecord, ...prev]);
+        saveAttendanceToSupabase(newRecord)
+          .then((ok) => {
+            if (!ok) {
+              try {
+                const raw = localStorage.getItem('convenio_pending_attendance_sync');
+                const pending = raw ? JSON.parse(raw) : [];
+                if (Array.isArray(pending) && !pending.some(p => p.id === newRecord.id)) {
+                  pending.push(newRecord);
+                  localStorage.setItem('convenio_pending_attendance_sync', JSON.stringify(pending));
+                }
+              } catch (qErr) {
+                console.warn('Failed to queue offline punch:', qErr);
               }
             }
-          } catch {
-            // fallback
-          }
+          })
+          .catch((err) => console.warn('Supabase attendance save error:', err));
 
-          finishRecord({
-            lat: Number(lat.toFixed(6)),
-            lng: Number(lng.toFixed(6)),
-            placeName: placeName || 'Live GPS Captured'
-          });
-        },
-        () => {
-          finishRecord({ lat: null, lng: null, placeName: 'GPS permission unavailable' });
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-      );
-    } else {
-      finishRecord({ lat: null, lng: null, placeName: 'Geolocation not supported' });
+        setIsProcessing(false);
+        stopCamera();
+
+        setSuccessData({
+          type: currentActionType,
+          shortTime,
+          formattedDate,
+          lat: locationData.lat,
+          lng: locationData.lng,
+          placeName: locationData.placeName,
+          mapUrl: locationData.lat ? `https://www.google.com/maps?q=${locationData.lat},${locationData.lng}` : null,
+          photo: finalPhoto || capturedPhoto,
+          name: activeEmpName,
+          branch: activeBranchName,
+          role: activeEmpRole,
+          geofenceVerified: isGeofenceOk,
+          distanceMeters: verifiedDistance
+        });
+      };
+
+      if ('geolocation' in navigator) {
+        navigator.geolocation.getCurrentPosition(
+          async (position) => {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            let placeName = '';
+
+            try {
+              const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+              const timeoutId = controller ? setTimeout(() => controller.abort(), 3000) : null;
+              const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`, {
+                headers: { 'Accept-Language': 'en' },
+                ...(controller ? { signal: controller.signal } : {})
+              });
+              if (timeoutId) clearTimeout(timeoutId);
+              if (res.ok) {
+                const data = await res.json();
+                if (data && data.display_name) {
+                  placeName = data.display_name.split(',').slice(0, 3).join(', ').trim();
+                }
+              }
+            } catch {
+              // fallback
+            }
+
+            finishRecord({
+              lat: Number(lat.toFixed(6)),
+              lng: Number(lng.toFixed(6)),
+              placeName: placeName || 'Live GPS Captured'
+            });
+          },
+          () => {
+            finishRecord({
+              lat: defaultLat,
+              lng: defaultLng,
+              placeName: defaultLat != null ? defaultPlace : 'GPS permission unavailable'
+            });
+          },
+          { enableHighAccuracy: true, timeout: 5000, maximumAge: 15000 }
+        );
+      } else {
+        finishRecord({
+          lat: defaultLat,
+          lng: defaultLng,
+          placeName: defaultLat != null ? defaultPlace : 'Geolocation not supported'
+        });
+      }
+    } catch (err) {
+      console.error('Attendance submit error:', err);
+      setIsProcessing(false);
     }
   };
 
@@ -3855,16 +3940,16 @@ export default function App() {
                           <div className="status-primary-line">
                             {latestTodayRecord?.type === 'in' ? (
                               <>
-                                <strong className="status-title-in">Checked In Today</strong>
+                                <strong className="status-title-in">{activeFormEmpName}: Checked In Today</strong>
                                 <span className="status-time-chip">{formatTo12HourTime(latestTodayRecord.shortTime || latestTodayRecord.time)}</span>
                               </>
                             ) : latestTodayRecord?.type === 'out' ? (
                               <>
-                                <strong className="status-title-out">Checked Out Today</strong>
+                                <strong className="status-title-out">{activeFormEmpName}: Checked Out Today</strong>
                                 <span className="status-time-chip">{formatTo12HourTime(latestTodayRecord.shortTime || latestTodayRecord.time)}</span>
                               </>
                             ) : (
-                              <strong className="status-title-none">Not Checked In Today</strong>
+                              <strong className="status-title-none">{activeFormEmpName}: Not Checked In Today</strong>
                             )}
                           </div>
                           <p className="status-subtext">
@@ -6995,7 +7080,16 @@ export default function App() {
 
       {/* ================= MODAL: SUCCESS CONFIRMATION ================= */}
       {successData && (
-        <div className="modal-overlay" onClick={() => setSuccessData(null)}>
+        <div
+          className="modal-overlay"
+          onClick={() => {
+            setSuccessData(null);
+            setTypedEmpName('');
+            setSelectedEmpId('');
+            setFormValidationMsg('');
+            try { localStorage.removeItem(STORAGE_KEY_SELECTED_EMP); } catch {}
+          }}
+        >
           <div className="modal-content success-modal-card" onClick={(e) => e.stopPropagation()}>
             <div className={`modal-icon ${successData.type}`}>
               <CheckCircle2 size={36} />
@@ -7051,7 +7145,16 @@ export default function App() {
               </a>
             )}
 
-            <button className="modal-close-btn" onClick={() => setSuccessData(null)}>
+            <button
+              className="modal-close-btn"
+              onClick={() => {
+                setSuccessData(null);
+                setTypedEmpName('');
+                setSelectedEmpId('');
+                setFormValidationMsg('');
+                try { localStorage.removeItem(STORAGE_KEY_SELECTED_EMP); } catch {}
+              }}
+            >
               Done
             </button>
           </div>
