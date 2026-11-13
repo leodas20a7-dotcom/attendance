@@ -1235,6 +1235,19 @@ export default function App() {
           const t = new Date(rec.created_at).getTime();
           if (!isNaN(t)) return t;
         }
+        // Priority 4: Parse 12-hour formatted time string
+        if (rec.shortTime || rec.time) {
+          const tStr = rec.shortTime || rec.time;
+          const m = String(tStr).match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)/i);
+          if (m) {
+            let h = parseInt(m[1], 10);
+            const mins = parseInt(m[2], 10);
+            const ampm = m[3].toUpperCase();
+            if (ampm === 'PM' && h < 12) h += 12;
+            if (ampm === 'AM' && h === 12) h = 0;
+            return h * 60 + mins;
+          }
+        }
         return 0;
       };
       return getExactPunchTime(b) - getExactPunchTime(a);
@@ -1680,6 +1693,15 @@ export default function App() {
       };
     }
 
+    if (!hasIn && hasOut) {
+      return {
+        status: 'no_in',
+        code: 'NC',
+        label: 'No Check In (Checked Out only)',
+        punches: dayPunches
+      };
+    }
+
     if (hasIn || hasOut) {
       return {
         status: 'present',
@@ -1702,6 +1724,9 @@ export default function App() {
       if (cell.status === 'present') {
         presentCount++;
       } else if (cell.status === 'missed') {
+        presentCount++;
+        missedCount++;
+      } else if (cell.status === 'no_in') {
         presentCount++;
         missedCount++;
       }
@@ -1998,7 +2023,7 @@ export default function App() {
     const outPunches = punches.filter(p => p.type === 'out');
 
     if (inPunches.length === 0 && outPunches.length > 0) {
-      return { label: 'Checked Out', hours: 0, minutes: 0, incomplete: true };
+      return { label: 'No Check In', hours: 0, minutes: 0, incomplete: true, hasNoIn: true };
     }
     if (inPunches.length > 0 && outPunches.length === 0) {
       return { label: 'Shift in progress', hours: 0, minutes: 0, active: true };
@@ -2198,9 +2223,31 @@ export default function App() {
       const staffList = Array.from(empMap.values()).map(staff => {
         // Sort punches chronologically
         const sorted = [...staff.punches].sort((a, b) => {
-          const tsA = a.timestamp || (a.id && a.id.startsWith('REC-') ? Number(a.id.slice(4)) || 0 : 0);
-          const tsB = b.timestamp || (b.id && b.id.startsWith('REC-') ? Number(b.id.slice(4)) || 0 : 0);
-          return tsA - tsB;
+          const getExactTs = (rec) => {
+            if (rec.id && rec.id.startsWith('REC-') && !rec.id.startsWith('REC-AUTO')) {
+              const num = Number(rec.id.slice(4));
+              if (!isNaN(num) && num > 1600000000000) return num;
+            }
+            if (rec.timestamp && !isNaN(Number(rec.timestamp))) return Number(rec.timestamp);
+            if (rec.created_at && !rec.id?.startsWith('REC-AUTO')) {
+              const t = new Date(rec.created_at).getTime();
+              if (!isNaN(t)) return t;
+            }
+            if (rec.shortTime || rec.time) {
+              const tStr = rec.shortTime || rec.time;
+              const m = String(tStr).match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)/i);
+              if (m) {
+                let h = parseInt(m[1], 10);
+                const mins = parseInt(m[2], 10);
+                const ampm = m[3].toUpperCase();
+                if (ampm === 'PM' && h < 12) h += 12;
+                if (ampm === 'AM' && h === 12) h = 0;
+                return h * 60 + mins;
+              }
+            }
+            return 0;
+          };
+          return getExactTs(a) - getExactTs(b);
         });
 
         const firstIn = sorted.find(p => p.type === 'in');
@@ -2260,7 +2307,8 @@ export default function App() {
     branchGroups.forEach(b => {
       b.staffPresentList.forEach(st => {
         let status = 'Present';
-        if (st.hasMissed) status = 'Missed Checkout';
+        if (st.hasNoIn) status = 'No Check In';
+        else if (st.hasMissed) status = 'Missed Checkout';
         else if (st.duration?.active) status = 'Shift in Progress';
 
         rows.push([
@@ -5640,6 +5688,8 @@ export default function App() {
                                           <span className="cell-pill cell-p">P</span>
                                         ) : cell.status === 'missed' ? (
                                           <span className="cell-pill cell-m">M</span>
+                                        ) : cell.status === 'no_in' ? (
+                                          <span className="cell-pill cell-m" title="No morning Check In">NC</span>
                                         ) : (
                                           <span className="cell-pill cell-off">-</span>
                                         )}
@@ -7918,8 +7968,8 @@ export default function App() {
                                             )}
                                           </td>
                                           <td className="payroll-col-duration">
-                                            <span className={`payroll-duration-pill ${st.duration?.active ? 'in-progress' : ''}`}>
-                                              {st.duration?.label || '-'}
+                                            <span className={`payroll-duration-pill ${st.hasNoIn ? 'in-progress' : st.duration?.active ? 'in-progress' : ''}`}>
+                                              {st.hasNoIn ? 'No Check In' : (st.duration?.label || '-')}
                                             </span>
                                           </td>
                                           <td className="payroll-col-status">
