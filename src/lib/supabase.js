@@ -355,16 +355,15 @@ export async function fetchAttendanceFromSupabase({ includePhotos = false } = {}
 }
 
 /**
- * Fast live query for recent (last 36h) attendance punches without photo blobs (< 3 KB)
+ * Fast live query for latest attendance punches without photo blobs (~35 KB, independent of device clock skew)
  */
-export async function fetchRecentAttendanceFromSupabase(hoursBack = 36) {
+export async function fetchRecentAttendanceFromSupabase(limitCount = 120) {
   try {
-    const sinceIso = new Date(Date.now() - hoursBack * 3600 * 1000).toISOString();
     const { data, error } = await supabase
       .from('attendance_records')
       .select(LIGHTWEIGHT_ATTENDANCE_COLUMNS)
-      .gte('created_at', sinceIso)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(limitCount);
 
     if (error || !data) return null;
     return data.map(mapAttendanceRow);

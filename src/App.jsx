@@ -308,12 +308,12 @@ export function getRecordSortMs(rec) {
     }
     const tStr = rec.time || rec.shortTime;
     if (tStr) {
-      const m = String(tStr).match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)/i);
+      const m = String(tStr).match(/(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*(AM|PM))?/i);
       if (m) {
         let h = parseInt(m[1], 10);
         const mins = parseInt(m[2], 10);
         const secs = m[3] ? parseInt(m[3], 10) : 0;
-        const ampm = m[4].toUpperCase();
+        const ampm = m[4] ? m[4].toUpperCase() : null;
         if (ampm === 'PM' && h < 12) h += 12;
         if (ampm === 'AM' && h === 12) h = 0;
         return new Date(dateParts.year, dateParts.month, dateParts.day, h, mins, secs, 0).getTime();
@@ -326,6 +326,57 @@ export function getRecordSortMs(rec) {
     if (!isNaN(t)) return t;
   }
   return 0;
+}
+
+/**
+ * Strips redundant/erroneous REC-AUTO records when an employee already checked out manually on that date,
+ * or deduplicates multiple REC-AUTO rows on the same date.
+ */
+export function stripRedundantAutoRecords(recordsList) {
+  if (!Array.isArray(recordsList) || recordsList.length === 0) {
+    return { cleaned: [], redundantIds: [] };
+  }
+
+  const byEmpDay = new Map();
+  recordsList.forEach(r => {
+    const empKey = normalizeEmpName(r.employeeName || r.name);
+    let parts = parseCalendarDateParts(r.date);
+    if (!parts) {
+      const ms = getRecordSortMs(r);
+      if (ms > 0) {
+        const d = new Date(ms);
+        parts = { year: d.getFullYear(), month: d.getMonth(), day: d.getDate() };
+      }
+    }
+    const ymd = parts ? formatPartsToYMD(parts) : '';
+    const key = empKey && ymd ? `${empKey}___${ymd}` : `raw_${r.id}`;
+    if (!byEmpDay.has(key)) byEmpDay.set(key, []);
+    byEmpDay.get(key).push(r);
+  });
+
+  const redundantIdSet = new Set();
+  byEmpDay.forEach(list => {
+    const sorted = [...list].sort((a, b) => getRecordSortMs(a) - getRecordSortMs(b));
+    const manual = sorted.filter(p => !isMissedCheckoutRecordUtil(p));
+    const auto = sorted.filter(p => isMissedCheckoutRecordUtil(p));
+    if (auto.length === 0) return;
+
+    const lastManual = manual[manual.length - 1];
+    if (!lastManual || lastManual.type === 'out') {
+      auto.forEach(a => { if (a?.id) redundantIdSet.add(a.id); });
+    } else if (auto.length > 1) {
+      auto.slice(0, -1).forEach(a => { if (a?.id) redundantIdSet.add(a.id); });
+    }
+  });
+
+  if (redundantIdSet.size === 0) {
+    return { cleaned: recordsList, redundantIds: [] };
+  }
+
+  return {
+    cleaned: recordsList.filter(r => !redundantIdSet.has(r.id)),
+    redundantIds: Array.from(redundantIdSet)
+  };
 }
 
 export function matchEmployeesByQuery(allCompanyEmployees, query) {
@@ -485,7 +536,8 @@ export default function App() {
   const [records, setRecords] = useState(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_RECORDS);
-      return saved ? JSON.parse(saved) : [];
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? stripRedundantAutoRecords(parsed).cleaned : [];
     } catch {
       return [];
     }
@@ -802,12 +854,18 @@ export default function App() {
       }
     });
 
-    return Array.from(byId.values()).sort((a, b) => getRecordSortMs(b) - getRecordSortMs(a));
+    const { cleaned } = stripRedundantAutoRecords(Array.from(byId.values()));
+    return cleaned.sort((a, b) => getRecordSortMs(b) - getRecordSortMs(a));
   }, []);
 
-  // Generate missed checkouts strictly from a freshly fetched cloud snapshot (NEVER stale localStorage!)
-  const applyMissedCheckoutsOnFreshCloud = useCallback((freshRecords) => {
-    if (!Array.isArray(freshRecords) || freshRecords.length === 0) return freshRecords;
+  // Generate missed checkouts strictly from a freshly fetched cloud snapshot & purge redundant auto-checkouts
+  const applyMissedCheckoutsOnFreshCloud = useCallback((rawFreshRecords) => {
+    if (!Array.isArray(rawFreshRecords) || rawFreshRecords.length === 0) return rawFreshRecords;
+
+    const { cleaned: freshRecords, redundantIds } = stripRedundantAutoRecords(rawFreshRecords);
+    if (redundantIds.length > 0) {
+      deleteAttendanceIdsFromSupabase(redundantIds);
+    }
 
     const now = getServerNow();
     const todayYMD = formatPartsToYMD({ year: now.getFullYear(), month: now.getMonth(), day: now.getDate() });
@@ -1409,13 +1467,12 @@ export default function App() {
     let cancelled = false;
     (async () => {
       try {
-        const recent = await fetchRecentAttendanceFromSupabase(36);
+        const recent = await fetchRecentAttendanceFromSupabase(120);
         if (!cancelled && recent !== null) {
           setRecords(prev => mergeAttendanceRecords(
-            // Preserve older records already in prev that fall outside the 36h window
             [
               ...recent,
-              ...prev.filter(oldRec => !recent.some(r => r.id === oldRec.id) && (Date.now() - getRecordSortMs(oldRec) >= 35 * 3600 * 1000))
+              ...prev.filter(oldRec => !recent.some(r => r.id === oldRec.id))
             ],
             prev
           ));
@@ -1463,18 +1520,20 @@ export default function App() {
     return cleanList.sort((a, b) => getRecordSortMs(b) - getRecordSortMs(a));
   }, [records, isRecordToday, sanitizeDayPunches]);
 
-  // List of distinct staff members who punched today with their counts
+  // List of distinct staff members who punched today with their counts (normalized so extra spaces don't duplicate)
   const todayStaffList = useMemo(() => {
     const map = new Map();
     todayRecords.forEach(r => {
-      const name = (r.employeeName || r.name || '').trim();
-      if (name) {
-        map.set(name, (map.get(name) || 0) + 1);
+      const rawName = (r.employeeName || r.name || '').trim();
+      const norm = normalizeEmpName(rawName);
+      if (norm) {
+        if (!map.has(norm)) {
+          map.set(norm, { name: rawName.replace(/\s+/g, ' '), count: 0 });
+        }
+        map.get(norm).count++;
       }
     });
-    return Array.from(map.entries())
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [todayRecords]);
 
   // Is employee actively verified and selected in the on-site form right now
@@ -2175,14 +2234,14 @@ export default function App() {
           return d.getHours() * 60 + d.getMinutes();
         }
       }
-      // 4. Try parsing time string e.g. "08:19:01 AM"
+      // 4. Try parsing time string e.g. "08:19:01 AM" or "20:01:35"
       const tStr = p.shortTime || p.time;
       if (tStr) {
-        const m = tStr.match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)/i);
+        const m = tStr.match(/(\d{1,2}):(\d{2})(?::\d{2})?(?:\s*(AM|PM))?/i);
         if (m) {
           let h = parseInt(m[1], 10);
           const mins = parseInt(m[2], 10);
-          const ampm = m[3].toUpperCase();
+          const ampm = m[3] ? m[3].toUpperCase() : null;
           if (ampm === 'PM' && h < 12) h += 12;
           if (ampm === 'AM' && h === 12) h = 0;
           return h * 60 + mins;
@@ -2257,11 +2316,11 @@ export default function App() {
       }
       const tStr = p.shortTime || p.time;
       if (tStr) {
-        const m = tStr.match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)/i);
+        const m = tStr.match(/(\d{1,2}):(\d{2})(?::\d{2})?(?:\s*(AM|PM))?/i);
         if (m) {
           let h = parseInt(m[1], 10);
           const mins = parseInt(m[2], 10);
-          const ampm = m[3].toUpperCase();
+          const ampm = m[3] ? m[3].toUpperCase() : null;
           if (ampm === 'PM' && h < 12) h += 12;
           if (ampm === 'AM' && h === 12) h = 0;
           return h * 60 + mins;
@@ -3120,12 +3179,12 @@ export default function App() {
     if ((actionType === 'out' && latestTodayRecord?.type !== 'in') || actionType === 'in') {
       setIsVerifyingAction(true);
       try {
-        const recent = await fetchRecentAttendanceFromSupabase(36);
+        const recent = await fetchRecentAttendanceFromSupabase(120);
         if (recent !== null) {
           effectiveRecords = mergeAttendanceRecords(
             [
               ...recent,
-              ...records.filter(oldRec => !recent.some(r => r.id === oldRec.id) && (Date.now() - getRecordSortMs(oldRec) >= 35 * 3600 * 1000))
+              ...records.filter(oldRec => !recent.some(r => r.id === oldRec.id))
             ],
             records
           );
@@ -6447,19 +6506,16 @@ export default function App() {
               </>
             ) : (
               (() => {
-                const staffTarget = historySelectedStaff.trim().toLowerCase();
+                const staffTarget = normalizeEmpName(historySelectedStaff);
                 const baseList = historySelectedStaff
-                  ? todayRecords.filter(r => {
-                      const empName = (r.employeeName || r.name || '').trim().toLowerCase();
-                      return empName === staffTarget || empName.includes(staffTarget) || staffTarget.includes(empName);
-                    })
+                  ? todayRecords.filter(r => normalizeEmpName(r.employeeName || r.name) === staffTarget)
                   : todayRecords;
 
                 const filteredList = baseList.filter((r) => {
-                  const s = historySearchTerm.toLowerCase();
+                  const s = normalizeEmpName(historySearchTerm);
                   const matchesSearch = 
                     !s || 
-                    r.employeeName.toLowerCase().includes(s) || 
+                    normalizeEmpName(r.employeeName).includes(s) || 
                     (r.branchName && r.branchName.toLowerCase().includes(s));
                   const matchesType = historyFilterType === 'all' || r.type === historyFilterType;
                   return matchesSearch && matchesType;
