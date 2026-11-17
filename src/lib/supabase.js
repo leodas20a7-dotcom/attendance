@@ -291,37 +291,63 @@ export async function removeEmployeeFromSupabase(empId) {
   }
 }
 
+const LIGHTWEIGHT_ATTENDANCE_COLUMNS =
+  'id,created_at,employee_name,employee_role,branch_name,type,date,time,short_time,lat,lng,place_name';
+
+function mapAttendanceRow(r) {
+  return {
+    id: r.id,
+    timestamp: r.created_at
+      ? new Date(r.created_at).getTime()
+      : (r.id && r.id.startsWith('REC-') && !isNaN(Number(r.id.slice(4))) ? Number(r.id.slice(4)) : null),
+    created_at: r.created_at,
+    employeeName: r.employee_name,
+    employeeRole: r.employee_role || '',
+    branchName: r.branch_name,
+    type: r.type,
+    date: r.date,
+    time: r.time,
+    shortTime: r.short_time,
+    photo: r.photo || null,
+    missedCheckout: Boolean(r.id?.includes('AUTO') || r.short_time?.includes('Missed')),
+    isAutoCheckout: Boolean(r.id?.startsWith('REC-AUTO')),
+    location: {
+      lat: r.lat,
+      lng: r.lng,
+      placeName: r.place_name || ''
+    }
+  };
+}
+
 /**
- * Fetch all attendance logs from Supabase
+ * Fetch all attendance logs from Supabase (lightweight by default — omits heavy photo blobs so page loads in <200ms)
  */
-export async function fetchAttendanceFromSupabase() {
+export async function fetchAttendanceFromSupabase({ includePhotos = false } = {}) {
   try {
-    const { data, error } = await supabase
-      .from('attendance_records')
-      .select('*')
-      .order('created_at', { ascending: false });
+    const columns = includePhotos ? '*' : LIGHTWEIGHT_ATTENDANCE_COLUMNS;
+    const PAGE_SIZE = 1000;
+    let allRows = [];
+    let from = 0;
 
-    if (error || !data) return null;
+    while (true) {
+      const { data, error } = await supabase
+        .from('attendance_records')
+        .select(columns)
+        .order('created_at', { ascending: false })
+        .range(from, from + PAGE_SIZE - 1);
 
-    return data.map(r => ({
-      id: r.id,
-      timestamp: r.created_at ? new Date(r.created_at).getTime() : (r.id && r.id.startsWith('REC-') && !isNaN(Number(r.id.slice(4))) ? Number(r.id.slice(4)) : null),
-      created_at: r.created_at,
-      employeeName: r.employee_name,
-      employeeRole: r.employee_role || '',
-      branchName: r.branch_name,
-      type: r.type,
-      date: r.date,
-      time: r.time,
-      shortTime: r.short_time,
-      photo: r.photo,
-      missedCheckout: Boolean(r.id?.includes('AUTO') || r.short_time?.includes('Missed')),
-      location: {
-        lat: r.lat,
-        lng: r.lng,
-        placeName: r.place_name || ''
+      if (error) {
+        console.warn('Error fetching attendance page:', error);
+        return from === 0 ? null : allRows.map(mapAttendanceRow);
       }
-    }));
+      if (!data || data.length === 0) break;
+
+      allRows = allRows.concat(data);
+      if (data.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
+    }
+
+    return allRows.map(mapAttendanceRow);
   } catch (err) {
     console.error('Error fetching attendance from Supabase:', err);
     return null;
@@ -329,27 +355,98 @@ export async function fetchAttendanceFromSupabase() {
 }
 
 /**
- * Save an attendance record to Supabase
+ * Fast live query for recent (last 36h) attendance punches without photo blobs (< 3 KB)
+ */
+export async function fetchRecentAttendanceFromSupabase(hoursBack = 36) {
+  try {
+    const sinceIso = new Date(Date.now() - hoursBack * 3600 * 1000).toISOString();
+    const { data, error } = await supabase
+      .from('attendance_records')
+      .select(LIGHTWEIGHT_ATTENDANCE_COLUMNS)
+      .gte('created_at', sinceIso)
+      .order('created_at', { ascending: false });
+
+    if (error || !data) return null;
+    return data.map(mapAttendanceRow);
+  } catch (err) {
+    console.warn('Error fetching recent attendance:', err);
+    return null;
+  }
+}
+
+/**
+ * Lazy-load Base64 selfie photos on-demand for visible log rows or receipt modal
+ */
+export async function fetchAttendancePhotosByIds(ids = []) {
+  try {
+    const cleanIds = (ids || []).filter(id => id && !String(id).startsWith('REC-AUTO'));
+    if (cleanIds.length === 0) return {};
+
+    const { data, error } = await supabase
+      .from('attendance_records')
+      .select('id,photo')
+      .in('id', cleanIds);
+
+    if (error || !data) return {};
+    const photoMap = {};
+    data.forEach(row => {
+      if (row.photo) photoMap[row.id] = row.photo;
+    });
+    return photoMap;
+  } catch (err) {
+    console.warn('Error lazy-loading photos:', err);
+    return {};
+  }
+}
+
+/**
+ * Remove specific attendance record IDs from Supabase (used e.g. to supersede a premature REC-AUTO when staff checks out late)
+ */
+export async function deleteAttendanceIdsFromSupabase(ids = []) {
+  try {
+    const cleanIds = (ids || []).filter(Boolean);
+    if (cleanIds.length === 0) return true;
+    const { error } = await supabase
+      .from('attendance_records')
+      .delete()
+      .in('id', cleanIds);
+    if (error) {
+      console.warn('Failed to delete superseded attendance IDs:', error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('Error deleting attendance IDs:', err);
+    return false;
+  }
+}
+
+/**
+ * Save an attendance record to Supabase (idempotent upsert so retries/offline syncs never 409)
  */
 export async function saveAttendanceToSupabase(record) {
   try {
-    const { error } = await supabase.from('attendance_records').insert({
-      id: record.id,
-      created_at: record.created_at || new Date().toISOString(),
-      employee_name: record.employeeName,
-      employee_role: record.employeeRole || '',
-      branch_name: record.branchName,
-      type: record.type,
-      date: record.date,
-      time: record.time,
-      short_time: record.missedCheckout ? '11:30 PM (Missed)' : record.shortTime,
-      photo: record.photo,
-      lat: record.location?.lat,
-      lng: record.location?.lng,
-      place_name: record.location?.placeName || ''
-    });
+    const isAuto = Boolean(record.isAutoCheckout || record.id?.startsWith('REC-AUTO'));
+    const { error } = await supabase.from('attendance_records').upsert(
+      {
+        id: record.id,
+        created_at: record.created_at || new Date().toISOString(),
+        employee_name: record.employeeName,
+        employee_role: record.employeeRole || '',
+        branch_name: record.branchName,
+        type: record.type,
+        date: record.date,
+        time: record.time,
+        short_time: record.missedCheckout ? '11:30 PM (Missed)' : record.shortTime,
+        photo: isAuto ? null : record.photo,
+        lat: record.location?.lat,
+        lng: record.location?.lng,
+        place_name: record.location?.placeName || ''
+      },
+      { onConflict: 'id', ignoreDuplicates: true }
+    );
     if (error) {
-      console.warn('Failed to insert attendance into Supabase:', error);
+      console.warn('Failed to save attendance into Supabase:', error);
       return false;
     }
     return true;

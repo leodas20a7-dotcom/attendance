@@ -94,6 +94,9 @@ import {
   syncEmployeeToSupabase, 
   removeEmployeeFromSupabase, 
   fetchAttendanceFromSupabase, 
+  fetchRecentAttendanceFromSupabase,
+  fetchAttendancePhotosByIds,
+  deleteAttendanceIdsFromSupabase,
   saveAttendanceToSupabase,
   clearAllAttendanceFromSupabase,
   fetchManagersFromSupabase,
@@ -227,6 +230,119 @@ export async function compressImageDataUrl(dataUrl, maxDimension = 480, quality 
     } catch {
       resolve(dataUrl);
     }
+  });
+}
+
+/** Normalize employee names consistently (ignores case and collapses multiple spaces like "Nithin  Sai"). */
+export function normalizeEmpName(name) {
+  return String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+export function isMissedCheckoutRecordUtil(r) {
+  return Boolean(r && (r.missedCheckout || r.isAutoCheckout || r.id?.includes('AUTO') || r.shortTime?.includes('Missed')));
+}
+
+export function parseCalendarDateParts(dateStr) {
+  if (!dateStr) return null;
+  const str = String(dateStr).trim();
+
+  const isoMatch = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (isoMatch) {
+    return {
+      year: parseInt(isoMatch[1], 10),
+      month: parseInt(isoMatch[2], 10) - 1,
+      day: parseInt(isoMatch[3], 10)
+    };
+  }
+
+  const tokens = str.match(/\b([a-zA-Z]+|\d+)\b/g);
+  if (!tokens || tokens.length < 3) return null;
+
+  const monthMap = {
+    jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+    jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+  };
+
+  let day = null, month = null, year = null;
+  for (const tok of tokens) {
+    const lower = tok.toLowerCase();
+    if (monthMap[lower.slice(0, 3)] !== undefined && month === null) {
+      month = monthMap[lower.slice(0, 3)];
+    } else if (/^\d{4}$/.test(tok) && year === null) {
+      year = parseInt(tok, 10);
+    } else if (/^\d{1,2}$/.test(tok) && day === null) {
+      const num = parseInt(tok, 10);
+      if (num >= 1 && num <= 31) day = num;
+    }
+  }
+
+  if (year !== null && month !== null && day !== null) {
+    return { year, month, day };
+  }
+  return null;
+}
+
+export function formatPartsToYMD(parts) {
+  if (!parts) return '';
+  return `${parts.year}-${String(parts.month + 1).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
+}
+
+export function getRecordSortMs(rec) {
+  if (!rec) return 0;
+  const isAuto = isMissedCheckoutRecordUtil(rec);
+  if (rec.id && typeof rec.id === 'string' && rec.id.startsWith('REC-') && !isAuto) {
+    const num = Number(rec.id.slice(4));
+    if (!isNaN(num) && num > 1600000000000) return num;
+  }
+  if (!isAuto && rec.timestamp && !isNaN(Number(rec.timestamp))) {
+    return Number(rec.timestamp);
+  }
+  if (!isAuto && rec.created_at) {
+    const t = new Date(rec.created_at).getTime();
+    if (!isNaN(t)) return t;
+  }
+  const dateParts = parseCalendarDateParts(rec.date);
+  if (dateParts) {
+    if (isAuto) {
+      return new Date(dateParts.year, dateParts.month, dateParts.day, 23, 30, 0, 0).getTime();
+    }
+    const tStr = rec.time || rec.shortTime;
+    if (tStr) {
+      const m = String(tStr).match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)/i);
+      if (m) {
+        let h = parseInt(m[1], 10);
+        const mins = parseInt(m[2], 10);
+        const secs = m[3] ? parseInt(m[3], 10) : 0;
+        const ampm = m[4].toUpperCase();
+        if (ampm === 'PM' && h < 12) h += 12;
+        if (ampm === 'AM' && h === 12) h = 0;
+        return new Date(dateParts.year, dateParts.month, dateParts.day, h, mins, secs, 0).getTime();
+      }
+    }
+    return new Date(dateParts.year, dateParts.month, dateParts.day, 0, 0, 0, 0).getTime();
+  }
+  if (rec.created_at) {
+    const t = new Date(rec.created_at).getTime();
+    if (!isNaN(t)) return t;
+  }
+  return 0;
+}
+
+export function matchEmployeesByQuery(allCompanyEmployees, query) {
+  const q = normalizeEmpName(query);
+  if (!q || q.length < 4) return [];
+  const cleanQ = q.replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+  if (!cleanQ || cleanQ.length < 4) return [];
+
+  return allCompanyEmployees.filter(emp => {
+    const rawName = normalizeEmpName(emp.name);
+    const cleanName = rawName.replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+    if (cleanName === cleanQ) return true;
+    if (cleanName.startsWith(cleanQ)) return true;
+    if (cleanQ.startsWith(cleanName)) return true;
+    if (cleanName.includes(cleanQ)) return true;
+    const words = cleanName.split(/\s+/);
+    return words.some(w => w.startsWith(cleanQ));
   });
 }
 
@@ -382,6 +498,16 @@ export default function App() {
   const [cameraError, setCameraError] = useState('');
   const [isCameraLoading, setIsCameraLoading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isVerifyingAction, setIsVerifyingAction] = useState(false);
+  const [lazyPhotoMap, setLazyPhotoMap] = useState({});
+
+  const cloudSyncedRef = useRef(false);
+  const lastCloudRefreshMsRef = useRef(0);
+
+  const getRecordPhoto = useCallback((rec) => {
+    if (!rec) return null;
+    return rec.photo || (rec.id ? lazyPhotoMap[rec.id] : null) || null;
+  }, [lazyPhotoMap]);
 
   // Success Feedback Modal
   const [successData, setSuccessData] = useState(null);
@@ -614,22 +740,206 @@ export default function App() {
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
 
+  // Helper to safely cache records into localStorage without blowing quota (strips heavy photo blobs)
+  const safeCacheRecords = useCallback((recs) => {
+    if (!recs || !Array.isArray(recs)) return;
+    try {
+      const lightweight = recs.map(r => (
+        r.photo && r.photo.length > 200 ? { ...r, photo: undefined } : r
+      ));
+      localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(lightweight));
+    } catch (e) {
+      try {
+        const sliced = recs.slice(0, 250).map(r => ({
+          ...r,
+          photo: undefined
+        }));
+        localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(sliced));
+      } catch (innerErr) {
+        console.warn('LocalStorage quota limit reached, skipping offline records cache.');
+      }
+    }
+  }, []);
+
+  // Merge fresh Supabase cloud list with any pending offline punches or freshly captured photos in memory
+  const mergeAttendanceRecords = useCallback((cloudList, localList = []) => {
+    const byId = new Map();
+    const localPhotoById = new Map();
+    const nowMs = Date.now();
+
+    (localList || []).forEach(r => {
+      if (r?.id && r.photo) localPhotoById.set(r.id, r.photo);
+    });
+
+    (cloudList || []).forEach(r => {
+      if (!r?.id) return;
+      byId.set(r.id, {
+        ...r,
+        photo: r.photo || localPhotoById.get(r.id) || null
+      });
+    });
+
+    // Retain any pending offline punches queued in localStorage so they remain visible immediately
+    try {
+      const rawPending = localStorage.getItem('convenio_pending_attendance_sync');
+      if (rawPending) {
+        const pending = JSON.parse(rawPending);
+        if (Array.isArray(pending)) {
+          pending.forEach(p => {
+            if (p?.id && !byId.has(p.id)) byId.set(p.id, p);
+          });
+        }
+      }
+    } catch {}
+
+    // Retain very recent (< 2m) manual punches created in memory while a cloud fetch was already in flight
+    (localList || []).forEach(r => {
+      if (r?.id && !isMissedCheckoutRecordUtil(r) && !byId.has(r.id)) {
+        const ms = getRecordSortMs(r);
+        if (ms > 0 && nowMs - ms < 120000) {
+          byId.set(r.id, r);
+        }
+      }
+    });
+
+    return Array.from(byId.values()).sort((a, b) => getRecordSortMs(b) - getRecordSortMs(a));
+  }, []);
+
+  // Generate missed checkouts strictly from a freshly fetched cloud snapshot (NEVER stale localStorage!)
+  const applyMissedCheckoutsOnFreshCloud = useCallback((freshRecords) => {
+    if (!Array.isArray(freshRecords) || freshRecords.length === 0) return freshRecords;
+
+    const now = getServerNow();
+    const todayYMD = formatPartsToYMD({ year: now.getFullYear(), month: now.getMonth(), day: now.getDate() });
+    const isPast1130PMToday = now.getHours() > 23 || (now.getHours() === 23 && now.getMinutes() >= 30);
+
+    const empDayMap = new Map();
+    freshRecords.forEach(r => {
+      const empKey = normalizeEmpName(r.employeeName || r.name);
+      if (!empKey) return;
+      let parts = parseCalendarDateParts(r.date);
+      if (!parts) {
+        const ms = getRecordSortMs(r);
+        if (ms > 0) {
+          const d = new Date(ms);
+          parts = { year: d.getFullYear(), month: d.getMonth(), day: d.getDate() };
+        }
+      }
+      if (!parts) return;
+      const ymd = formatPartsToYMD(parts);
+      const groupKey = `${empKey}___${ymd}`;
+      if (!empDayMap.has(groupKey)) {
+        empDayMap.set(groupKey, {
+          empKey,
+          displayName: (r.employeeName || r.name || '').trim(),
+          ymd,
+          parts,
+          punches: []
+        });
+      }
+      empDayMap.get(groupKey).punches.push(r);
+    });
+
+    const newAutoRecords = [];
+    empDayMap.forEach(({ empKey, displayName, ymd, parts, punches }) => {
+      const sorted = [...punches].sort((a, b) => getRecordSortMs(a) - getRecordSortMs(b));
+      const manualPunches = sorted.filter(p => !isMissedCheckoutRecordUtil(p));
+      if (manualPunches.length === 0) return;
+
+      const lastManual = manualPunches[manualPunches.length - 1];
+      if (!lastManual || lastManual.type !== 'in') return; // Closed manually with 'out' -> do NOT touch!
+
+      const isToday = ymd === todayYMD;
+      if (isToday) {
+        if (!isPast1130PMToday) return;
+        const punchTime = new Date(getRecordSortMs(lastManual));
+        const punchedAfterCutoff = punchTime.getHours() > 23 || (punchTime.getHours() === 23 && punchTime.getMinutes() >= 30);
+        if (punchedAfterCutoff) return;
+      }
+
+      const compactDate = ymd.replace(/-/g, '');
+      const cleanEmpToken = empKey.replace(/[^a-z0-9]/g, '');
+      const alreadyHasAuto = sorted.some(p => isMissedCheckoutRecordUtil(p));
+      if (alreadyHasAuto) return;
+
+      const dObj = new Date(parts.year, parts.month, parts.day, 23, 30, 0, 0);
+      const autoRecord = {
+        id: `REC-AUTO-${cleanEmpToken}-${compactDate}`,
+        timestamp: dObj.getTime(),
+        created_at: dObj.toISOString(),
+        employeeName: displayName,
+        employeeRole: lastManual.employeeRole || 'Staff',
+        branchName: lastManual.branchName || 'Convenio Mart',
+        type: 'out',
+        date: lastManual.date || dObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        time: '11:30:00 PM',
+        shortTime: '11:30 PM',
+        photo: null,
+        geofenceVerified: false,
+        missedCheckout: true,
+        isAutoCheckout: true,
+        location: {
+          lat: null,
+          lng: null,
+          placeName: 'Auto Check-Out (Missed Checkout after 11:30 PM)'
+        }
+      };
+      newAutoRecords.push(autoRecord);
+    });
+
+    if (newAutoRecords.length > 0) {
+      newAutoRecords.forEach(rec => {
+        saveAttendanceToSupabase(rec);
+      });
+      return [...newAutoRecords, ...freshRecords].sort((a, b) => getRecordSortMs(b) - getRecordSortMs(a));
+    }
+
+    return freshRecords;
+  }, []);
+
+  // Lightweight refresh (~75 KB without photos) used on boot, PWA resume/focus, and interval
+  const refreshAttendanceFromCloud = useCallback(async ({ force = false, silent = true } = {}) => {
+    const nowMs = Date.now();
+    if (!force && nowMs - lastCloudRefreshMsRef.current < 8000) return null;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return null;
+
+    if (!silent) setIsSyncing(true);
+    try {
+      const cloudRecords = await fetchAttendanceFromSupabase({ includePhotos: false });
+      if (cloudRecords !== null) {
+        lastCloudRefreshMsRef.current = Date.now();
+        cloudSyncedRef.current = true;
+        const checkedCloud = applyMissedCheckoutsOnFreshCloud(cloudRecords);
+        setRecords(prev => {
+          const merged = mergeAttendanceRecords(checkedCloud, prev);
+          safeCacheRecords(merged);
+          return merged;
+        });
+        return checkedCloud;
+      }
+      return null;
+    } catch (err) {
+      console.warn('Cloud attendance refresh note:', err);
+      return null;
+    } finally {
+      if (!silent) setIsSyncing(false);
+    }
+  }, [applyMissedCheckoutsOnFreshCloud, mergeAttendanceRecords, safeCacheRecords]);
+
   // Connect and sync with Supabase on mount
   useEffect(() => {
     async function initSupabase() {
       setIsSyncing(true);
       try {
-        // Sync server time first (anti-tampering: prevents fake phone clock punches)
         await initServerTime();
 
         const status = await checkSupabaseStatus();
         setSupabaseStatus(status);
 
         if (status.tablesReady) {
-          // Concurrently fetch branches, attendance records, managers & circulars from Supabase
           const [cloudBranches, cloudRecords, cloudManagers, cloudCirculars] = await Promise.all([
             fetchBranchesFromSupabase(),
-            fetchAttendanceFromSupabase(),
+            fetchAttendanceFromSupabase({ includePhotos: false }),
             fetchManagersFromSupabase(),
             fetchCircularsFromSupabase()
           ]);
@@ -637,7 +947,6 @@ export default function App() {
           if (cloudBranches && cloudBranches.length > 0) {
             setBranches(cloudBranches);
           } else {
-            // Tables exist but are empty: seed Casagrand branches
             await seedBranchesToSupabase(DEFAULT_BRANCHES);
             const seeded = await fetchBranchesFromSupabase();
             if (seeded && seeded.length > 0) {
@@ -646,8 +955,14 @@ export default function App() {
           }
 
           if (cloudRecords !== null) {
-            setRecords(cloudRecords);
-            safeCacheRecords(cloudRecords);
+            lastCloudRefreshMsRef.current = Date.now();
+            cloudSyncedRef.current = true;
+            const checkedCloud = applyMissedCheckoutsOnFreshCloud(cloudRecords);
+            setRecords(prev => {
+              const merged = mergeAttendanceRecords(checkedCloud, prev);
+              safeCacheRecords(merged);
+              return merged;
+            });
           }
 
           if (cloudManagers && Array.isArray(cloudManagers) && cloudManagers.length > 0) {
@@ -668,32 +983,34 @@ export default function App() {
     }
 
     initSupabase();
-  }, []);
+  }, [applyMissedCheckoutsOnFreshCloud, mergeAttendanceRecords, safeCacheRecords]);
 
+  // Auto-refresh lightweight attendance whenever PWA resumes from background, regains focus, or ticks 90s
+  useEffect(() => {
+    const handleWake = () => {
+      if (document.visibilityState === 'visible') {
+        refreshAttendanceFromCloud({ silent: true });
+      }
+    };
+    document.addEventListener('visibilitychange', handleWake);
+    window.addEventListener('focus', handleWake);
+    const pollTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        refreshAttendanceFromCloud({ silent: true });
+      }
+    }, 90000);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleWake);
+      window.removeEventListener('focus', handleWake);
+      clearInterval(pollTimer);
+    };
+  }, [refreshAttendanceFromCloud]);
 
   const copySqlToClipboard = () => {
     navigator.clipboard.writeText(SUPABASE_SCHEMA_SQL);
     setCopiedSql(true);
     setTimeout(() => setCopiedSql(false), 2500);
-  };
-
-  // Helper to safely cache records into localStorage without blowing quota (e.g. photos)
-  const safeCacheRecords = (recs) => {
-    if (!recs || !Array.isArray(recs)) return;
-    try {
-      localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(recs));
-    } catch (e) {
-      // If photo data URLs exceed 5MB quota, strip heavy photo strings for offline cache
-      try {
-        const lightweight = recs.slice(0, 150).map(r => ({
-          ...r,
-          photo: r.photo && r.photo.length > 200 ? undefined : r.photo
-        }));
-        localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(lightweight));
-      } catch (innerErr) {
-        console.warn('LocalStorage quota limit reached, skipping offline records cache.');
-      }
-    }
   };
 
   // Sync circulars to localStorage
@@ -709,7 +1026,7 @@ export default function App() {
   // Sync attendance records to localStorage safely
   useEffect(() => {
     safeCacheRecords(records);
-  }, [records]);
+  }, [records, safeCacheRecords]);
 
   // Retry any offline/failed attendance punches when connection is available
   useEffect(() => {
@@ -980,110 +1297,37 @@ export default function App() {
   // Active employee name on attendance form - strictly from verified employee list only
   const activeFormEmpName = currentFormEmployee ? currentFormEmployee.name : '';
 
-  // Match typed name against official company employee list across all branches
-  // Waits for at least 4 characters before matching
+  // Match typed name against official company employee list across all branches (collapses spaces)
   const matchedCompanyEmployees = useMemo(() => {
-    const q = typedEmpName.trim().toLowerCase();
-    if (!q || q.length < 4) return [];
-    const cleanQ = q.replace(/[^a-z0-9\s]/g, '');
-    if (!cleanQ || cleanQ.length < 4) return [];
-
-    return allCompanyEmployees.filter(emp => {
-      const rawName = (emp.name || '').toLowerCase();
-      const cleanName = rawName.replace(/[^a-z0-9\s]/g, '');
-      if (cleanName === cleanQ) return true;
-      if (cleanName.startsWith(cleanQ)) return true;
-      if (cleanQ.startsWith(cleanName)) return true;
-      if (cleanName.includes(cleanQ)) return true;
-      const words = cleanName.split(/\s+/);
-      return words.some(w => w.startsWith(cleanQ));
-    });
+    return matchEmployeesByQuery(allCompanyEmployees, typedEmpName);
   }, [typedEmpName, allCompanyEmployees]);
 
   // Handler for typing in the name box below dropdown
   const handleTypedNameChange = (val) => {
     setTypedEmpName(val);
     if (formValidationMsg) setFormValidationMsg('');
-    const q = val.trim().toLowerCase();
-    
-    // Wait for at least 4 characters before checking against employee list
-    if (!q || q.length < 4) {
-      setSelectedEmpId('');
-      return;
-    }
-    const cleanQ = q.replace(/[^a-z0-9\s]/g, '');
+    const cleanQ = normalizeEmpName(val).replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
     if (!cleanQ || cleanQ.length < 4) {
       setSelectedEmpId('');
       return;
     }
 
-    const matches = allCompanyEmployees.filter(emp => {
-      const rawName = (emp.name || '').toLowerCase();
-      const cleanName = rawName.replace(/[^a-z0-9\s]/g, '');
-      if (cleanName === cleanQ) return true;
-      if (cleanName.startsWith(cleanQ)) return true;
-      if (cleanQ.startsWith(cleanName)) return true;
-      if (cleanName.includes(cleanQ)) return true;
-      const words = cleanName.split(/\s+/);
-      return words.some(w => w.startsWith(cleanQ));
-    });
+    const matches = matchEmployeesByQuery(allCompanyEmployees, val);
 
     if (matches.length === 1) {
-      // Exactly 1 match found in company roster -> auto-select
       setSelectedEmpId(matches[0].id);
     } else if (matches.length > 1) {
-      // Duplicate / multiple matches -> user MUST explicitly choose which one
       if (!matches.some(m => m.id === selectedEmpId)) {
         setSelectedEmpId('');
       }
     } else {
-      // 0 matches found in company roster -> clear selection so invalid names cannot be recorded
       setSelectedEmpId('');
     }
   };
 
   // Helper to parse calendar date string (e.g. 'Nov 6, 2026', '6 Nov 2026', '2026-11-06')
   const parseCalendarDate = useCallback((dateStr) => {
-    if (!dateStr) return null;
-    const str = String(dateStr).trim();
-
-    // Check ISO format YYYY-MM-DD
-    const isoMatch = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-    if (isoMatch) {
-      return {
-        year: parseInt(isoMatch[1], 10),
-        month: parseInt(isoMatch[2], 10) - 1,
-        day: parseInt(isoMatch[3], 10)
-      };
-    }
-
-    const tokens = str.match(/\b([a-zA-Z]+|\d+)\b/g);
-    if (!tokens || tokens.length < 3) return null;
-
-    const monthMap = {
-      jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
-      jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
-    };
-
-    let day = null, month = null, year = null;
-    for (const tok of tokens) {
-      const lower = tok.toLowerCase();
-      if (monthMap[lower.slice(0, 3)] !== undefined && month === null) {
-        month = monthMap[lower.slice(0, 3)];
-      } else if (/^\d{4}$/.test(tok) && year === null) {
-        year = parseInt(tok, 10);
-      } else if (/^\d{1,2}$/.test(tok) && day === null) {
-        const num = parseInt(tok, 10);
-        if (num >= 1 && num <= 31) {
-          day = num;
-        }
-      }
-    }
-
-    if (year !== null && month !== null && day !== null) {
-      return { year, month, day };
-    }
-    return null;
+    return parseCalendarDateParts(dateStr);
   }, []);
 
   // Helper to reliably check if a record was recorded today across any browser locale / format
@@ -1095,7 +1339,6 @@ export default function App() {
     const curDate = now.getDate();
 
     // 1. PRIMARY SOURCE OF TRUTH: Calendar date string (r.date)
-    // Never let an automated background process created_at timestamp override the explicit shift date!
     if (r.date) {
       const parsed = parseCalendarDate(r.date);
       if (parsed) {
@@ -1103,7 +1346,7 @@ export default function App() {
       }
     }
 
-    // 2. Explicit numeric timestamp (if no explicit date string)
+    // 2. Explicit numeric timestamp
     if (r.timestamp && !isNaN(Number(r.timestamp))) {
       const d = new Date(Number(r.timestamp));
       if (!isNaN(d.getTime())) {
@@ -1111,7 +1354,7 @@ export default function App() {
       }
     }
 
-    // 3. REC-ID timestamp (e.g. REC-1793941915032, ignoring auto-generated records without numeric timestamps)
+    // 3. REC-ID timestamp
     if (r.id && typeof r.id === 'string' && r.id.startsWith('REC-') && !r.id.startsWith('REC-AUTO')) {
       const idSub = r.id.slice(4);
       if (!isNaN(Number(idSub))) {
@@ -1126,7 +1369,7 @@ export default function App() {
     }
 
     // 4. created_at fallback only if not an auto-generated checkout
-    if (r.created_at && !r.id?.startsWith('REC-AUTO') && !r.isAutoCheckout) {
+    if (r.created_at && !isMissedCheckoutRecordUtil(r)) {
       const d = new Date(r.created_at);
       if (!isNaN(d.getTime())) {
         return d.getFullYear() === curYear && d.getMonth() === curMonth && d.getDate() === curDate;
@@ -1138,169 +1381,87 @@ export default function App() {
 
   // Helper to check if a record is marked as a missed checkout
   const isMissedCheckoutRecord = useCallback((r) => {
-    return Boolean(r && (r.missedCheckout || r.isAutoCheckout || r.id?.includes('AUTO') || r.shortTime?.includes('Missed')));
+    return isMissedCheckoutRecordUtil(r);
   }, []);
 
-  // Auto-Checkout: automatically mark check-out for staff who forgot to check out after 11:30 PM
-  const checkAndApplyMissedCheckouts = useCallback((currentRecords) => {
-    if (!Array.isArray(currentRecords) || currentRecords.length === 0) return currentRecords;
+  // Sanitize an employee's punches for a day: ignore redundant REC-AUTO if a manual checkout already closed the shift
+  const sanitizeDayPunches = useCallback((rawPunches) => {
+    if (!Array.isArray(rawPunches) || rawPunches.length === 0) return [];
+    const sorted = [...rawPunches].sort((a, b) => getRecordSortMs(a) - getRecordSortMs(b));
+    const manualPunches = sorted.filter(p => !isMissedCheckoutRecordUtil(p));
+    const autoPunches = sorted.filter(p => isMissedCheckoutRecordUtil(p));
 
-    // Use server-authoritative time for auto-checkout evaluation
-    const now = getServerNow();
-    // After 11:30 PM check (23:30 or later)
-    const isPast1130PMToday = now.getHours() > 23 || (now.getHours() === 23 && now.getMinutes() >= 30);
+    if (autoPunches.length === 0) return sorted;
 
-    // Group records by employeeName and date
-    const empDateMap = new Map();
-
-    currentRecords.forEach(r => {
-      const empName = (r.employeeName || r.name || '').trim();
-      const date = (r.date || '').trim();
-      if (!empName || !date) return;
-
-      const key = `${empName.toLowerCase()}___${date.toLowerCase()}`;
-      if (!empDateMap.has(key)) {
-        empDateMap.set(key, { empName, date, punches: [] });
-      }
-      empDateMap.get(key).punches.push(r);
-    });
-
-    const newAutoRecords = [];
-
-    empDateMap.forEach(({ empName, date, punches }) => {
-      // Sort punches chronologically (oldest to newest)
-      const sorted = [...punches].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-      const lastPunch = sorted[sorted.length - 1];
-
-      // If the latest punch on that date is an unclosed 'in'
-      if (lastPunch && lastPunch.type === 'in') {
-        const isToday = isRecordToday(lastPunch);
-        const isEligible = isToday ? isPast1130PMToday : true;
-
-        if (isEligible) {
-          const autoId = `REC-AUTO-${empName.toLowerCase().replace(/[^a-z0-9]/g, '')}-${date.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
-          const alreadyExists = currentRecords.some(r => 
-            r.id === autoId || 
-            (r.employeeName?.toLowerCase() === empName.toLowerCase() && 
-             r.date?.toLowerCase() === date.toLowerCase() && 
-             r.type === 'out')
-          );
-
-          if (!alreadyExists) {
-            const dObj = new Date(lastPunch.date || date);
-            dObj.setHours(23, 30, 0, 0);
-            const autoTimestamp = !isNaN(dObj.getTime()) ? dObj.getTime() : (lastPunch.timestamp || Date.now()) + 3600000;
-            const autoCreatedAt = !isNaN(dObj.getTime()) ? dObj.toISOString() : new Date().toISOString();
-
-            const autoRecord = {
-              id: autoId,
-              timestamp: autoTimestamp,
-              created_at: autoCreatedAt,
-              employeeName: empName,
-              employeeRole: lastPunch.employeeRole || 'Staff',
-              branchName: lastPunch.branchName || 'Convenio Mart',
-              type: 'out',
-              date: lastPunch.date || date,
-              time: '11:30:00 PM',
-              shortTime: '11:30 PM',
-              photo: lastPunch.photo || null,
-              geofenceVerified: false,
-              missedCheckout: true,
-              isAutoCheckout: true,
-              location: {
-                lat: null,
-                lng: null,
-                placeName: 'Auto Check-Out (Missed Checkout after 11:30 PM)'
-              }
-            };
-            newAutoRecords.push(autoRecord);
-          }
-        }
-      }
-    });
-
-    if (newAutoRecords.length > 0) {
-      newAutoRecords.forEach(rec => {
-        saveAttendanceToSupabase(rec);
-      });
-      const updated = [...newAutoRecords, ...currentRecords];
-      try {
-        localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(updated));
-      } catch (e) {
-        console.warn('Failed to save auto-records to storage:', e);
-      }
-      return updated;
+    const lastManual = manualPunches[manualPunches.length - 1];
+    if (lastManual && lastManual.type === 'out') {
+      return manualPunches;
     }
+    if (lastManual && lastManual.type === 'in') {
+      return [...manualPunches, autoPunches[autoPunches.length - 1]];
+    }
+    return sorted;
+  }, []);
 
-    return currentRecords;
-  }, [isRecordToday]);
-
-  // Periodic check for 11:30 PM cutoff and initial missed checkouts
+  // Whenever an employee is selected on the attendance form, silently sync today's recent punches from cloud
   useEffect(() => {
-    setRecords(prev => checkAndApplyMissedCheckouts(prev));
-
-    const timer = setInterval(() => {
-      setRecords(prev => checkAndApplyMissedCheckouts(prev));
-    }, 60000);
-
-    return () => clearInterval(timer);
-  }, [checkAndApplyMissedCheckouts]);
+    if (!selectedEmpId || view !== 'attendance') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const recent = await fetchRecentAttendanceFromSupabase(36);
+        if (!cancelled && recent !== null) {
+          setRecords(prev => mergeAttendanceRecords(
+            // Preserve older records already in prev that fall outside the 36h window
+            [
+              ...recent,
+              ...prev.filter(oldRec => !recent.some(r => r.id === oldRec.id) && (Date.now() - getRecordSortMs(oldRec) >= 35 * 3600 * 1000))
+            ],
+            prev
+          ));
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [selectedEmpId, view, mergeAttendanceRecords]);
 
   // Memoized Today's Check Ins count
   const todayCheckInsCount = useMemo(() => {
     return records.filter(r => r.type === 'in' && isRecordToday(r)).length;
   }, [records, isRecordToday]);
 
-  // Smart Status Detection: Find latest attendance record for this employee today
+  // Smart Status Detection: Find latest manual attendance record for this employee today
   const latestTodayRecord = useMemo(() => {
     if (!activeFormEmpName) return null;
-    const targetName = activeFormEmpName.trim().toLowerCase().replace(/\s+/g, ' ');
+    const targetName = normalizeEmpName(activeFormEmpName);
     const empTodayRecs = records.filter(r => {
-      const empName = (r.employeeName || r.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      const empName = normalizeEmpName(r.employeeName || r.name);
       return empName === targetName && isRecordToday(r);
     });
     if (empTodayRecs.length === 0) return null;
 
-    // Guaranteed chronological sort descending (newest punch at index 0)
-    empTodayRecs.sort((a, b) => {
-      const getExactPunchTime = (rec) => {
-        // Priority 1: id with epoch millis (e.g. REC-1793941915032)
-        if (rec.id && rec.id.startsWith('REC-') && !rec.id.startsWith('REC-AUTO')) {
-          const num = Number(rec.id.slice(4));
-          if (!isNaN(num) && num > 1600000000000) return num;
-        }
-        // Priority 2: explicit numeric timestamp
-        if (rec.timestamp && !isNaN(Number(rec.timestamp))) return Number(rec.timestamp);
-        // Priority 3: created_at (if not auto-generated)
-        if (rec.created_at && !rec.id?.startsWith('REC-AUTO')) {
-          const t = new Date(rec.created_at).getTime();
-          if (!isNaN(t)) return t;
-        }
-        // Priority 4: Parse 12-hour formatted time string
-        if (rec.shortTime || rec.time) {
-          const tStr = rec.shortTime || rec.time;
-          const m = String(tStr).match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)/i);
-          if (m) {
-            let h = parseInt(m[1], 10);
-            const mins = parseInt(m[2], 10);
-            const ampm = m[3].toUpperCase();
-            if (ampm === 'PM' && h < 12) h += 12;
-            if (ampm === 'AM' && h === 12) h = 0;
-            return h * 60 + mins;
-          }
-        }
-        return 0;
-      };
-      return getExactPunchTime(b) - getExactPunchTime(a);
-    });
-
-    return empTodayRecs[0];
+    // Prioritize manual punches so an auto 11:30 PM missed checkout never traps late closing staff from checking out
+    const manualTodayRecs = empTodayRecs.filter(r => !isMissedCheckoutRecordUtil(r));
+    const pool = manualTodayRecs.length > 0 ? manualTodayRecs : empTodayRecs;
+    pool.sort((a, b) => getRecordSortMs(b) - getRecordSortMs(a));
+    return pool[0];
   }, [activeFormEmpName, records, isRecordToday]);
 
-  // All today's attendance records across all staff
+  // All today's attendance records across all staff (suppressing superseded REC-AUTO when manual out closed shift)
   const todayRecords = useMemo(() => {
-    return records.filter(isRecordToday);
-  }, [records, isRecordToday]);
+    const todayRaw = records.filter(isRecordToday);
+    const byEmp = new Map();
+    todayRaw.forEach(r => {
+      const k = normalizeEmpName(r.employeeName || r.name) || r.id;
+      if (!byEmp.has(k)) byEmp.set(k, []);
+      byEmp.get(k).push(r);
+    });
+    const cleanList = [];
+    byEmp.forEach(punches => {
+      cleanList.push(...sanitizeDayPunches(punches));
+    });
+    return cleanList.sort((a, b) => getRecordSortMs(b) - getRecordSortMs(a));
+  }, [records, isRecordToday, sanitizeDayPunches]);
 
   // List of distinct staff members who punched today with their counts
   const todayStaffList = useMemo(() => {
@@ -1322,16 +1483,11 @@ export default function App() {
   // Today's attendance records for the currently selected employee
   const currentEmployeeTodayRecords = useMemo(() => {
     if (!activeFormEmpName) return [];
-    const targetName = activeFormEmpName.trim().toLowerCase().replace(/\s+/g, ' ');
-    return todayRecords.filter(r => {
-      const empName = (r.employeeName || r.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
-      return empName === targetName;
-    });
+    const targetName = normalizeEmpName(activeFormEmpName);
+    return todayRecords.filter(r => normalizeEmpName(r.employeeName || r.name) === targetName);
   }, [todayRecords, activeFormEmpName]);
 
   const handleOpenHistoryDrawer = () => {
-    // If user is verified on-site and actively selected an employee on the form, pre-filter to their name.
-    // Otherwise (e.g. outside geofence), show All Staff Today without falsely assuming stale localStorage!
     if (isEmpActivelyOnSite) {
       setHistorySelectedStaff(activeFormEmpName);
     } else {
@@ -1340,6 +1496,7 @@ export default function App() {
     setHistorySearchTerm('');
     setHistoryFilterType('all');
     setShowHistoryDrawer(true);
+    refreshAttendanceFromCloud({ force: true, silent: true });
   };
 
   // Active branch in Admin Management
@@ -1590,15 +1747,15 @@ export default function App() {
     const list = [];
     const seen = new Set();
 
-    // Only include currently active, non-deleted employees from configured branches
     branches.forEach(branch => {
       if (Array.isArray(branch.employees)) {
         branch.employees.forEach(emp => {
           const empName = (typeof emp === 'string' ? emp : emp.name || '').trim();
-          if (empName && !seen.has(empName.toLowerCase())) {
-            seen.add(empName.toLowerCase());
+          const normKey = normalizeEmpName(empName);
+          if (normKey && !seen.has(normKey)) {
+            seen.add(normKey);
             list.push({
-              id: emp.id || `emp-${empName.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
+              id: emp.id || `emp-${normKey.replace(/[^a-z0-9]/g, '')}`,
               name: empName,
               role: emp.role || 'Staff',
               branchId: branch.id,
@@ -1619,8 +1776,8 @@ export default function App() {
         return false;
       }
       if (timesheetSearch.trim()) {
-        const query = timesheetSearch.toLowerCase().trim();
-        const matchesName = emp.name.toLowerCase().includes(query);
+        const query = normalizeEmpName(timesheetSearch);
+        const matchesName = normalizeEmpName(emp.name).includes(query);
         const matchesRole = emp.role.toLowerCase().includes(query);
         const matchesBranch = emp.branchName.toLowerCase().includes(query);
         if (!matchesName && !matchesRole && !matchesBranch) return false;
@@ -1629,16 +1786,20 @@ export default function App() {
     });
   }, [allTimesheetEmployees, timesheetBranchId, timesheetSearch]);
 
-  // Helper to extract year, month, day from a record
+  // Helper to extract year, month, day from a record (authoritative r.date first)
   const getRecordDateComponents = useCallback((r) => {
     if (!r) return null;
+    if (r.date) {
+      const parsed = parseCalendarDateParts(r.date);
+      if (parsed) return parsed;
+    }
     if (r.timestamp && !isNaN(Number(r.timestamp))) {
       const d = new Date(Number(r.timestamp));
       if (!isNaN(d.getTime())) {
         return { year: d.getFullYear(), month: d.getMonth(), day: d.getDate() };
       }
     }
-    if (r.id && typeof r.id === 'string' && r.id.startsWith('REC-')) {
+    if (r.id && typeof r.id === 'string' && r.id.startsWith('REC-') && !r.id.startsWith('REC-AUTO')) {
       const rawTs = r.id.slice(4).split('-')[0];
       const ts = Number(rawTs);
       if (!isNaN(ts) && ts > 1600000000000) {
@@ -1654,36 +1815,6 @@ export default function App() {
         return { year: d.getFullYear(), month: d.getMonth(), day: d.getDate() };
       }
     }
-    if (r.date) {
-      const d = new Date(r.date);
-      if (!isNaN(d.getTime())) {
-        return { year: d.getFullYear(), month: d.getMonth(), day: d.getDate() };
-      }
-      const parts = String(r.date).trim().split(/[\s,/-]+/);
-      if (parts.length >= 3) {
-        const monthMap = {
-          jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
-          jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
-        };
-        let y = null, m = null, dayNum = null;
-        parts.forEach(p => {
-          const pLower = p.toLowerCase().slice(0, 3);
-          if (monthMap[pLower] !== undefined) {
-            m = monthMap[pLower];
-          } else if (/^\d{4}$/.test(p)) {
-            y = parseInt(p, 10);
-          } else if (/^\d{1,2}$/.test(p)) {
-            const num = parseInt(p, 10);
-            if (dayNum === null && num <= 31) {
-              dayNum = num;
-            }
-          }
-        });
-        if (y !== null && m !== null && dayNum !== null) {
-          return { year: y, month: m, day: dayNum };
-        }
-      }
-    }
     return null;
   }, []);
 
@@ -1691,7 +1822,7 @@ export default function App() {
   const timesheetMonthRecordsMap = useMemo(() => {
     const map = new Map();
     records.forEach(r => {
-      const empName = (r.employeeName || r.name || '').trim().toLowerCase();
+      const empName = normalizeEmpName(r.employeeName || r.name);
       if (!empName) return;
 
       const comp = getRecordDateComponents(r);
@@ -1713,14 +1844,15 @@ export default function App() {
 
   // Determine status of an employee on a specific day
   const getTimesheetDayStatus = useCallback((empName, day) => {
-    const empKey = empName.toLowerCase().trim();
+    const empKey = normalizeEmpName(empName);
     const empDays = timesheetMonthRecordsMap.get(empKey);
-    const dayPunches = empDays ? empDays[day] : null;
+    const rawDayPunches = empDays ? empDays[day] : null;
 
-    if (!dayPunches || dayPunches.length === 0) {
+    if (!rawDayPunches || rawDayPunches.length === 0) {
       return { status: 'none', code: '-', label: 'Absent / Off', punches: [] };
     }
 
+    const dayPunches = sanitizeDayPunches(rawDayPunches);
     const hasMissed = dayPunches.some(p => isMissedCheckoutRecord(p));
     const hasIn = dayPunches.some(p => p.type === 'in');
     const hasOut = dayPunches.some(p => p.type === 'out' && !isMissedCheckoutRecord(p));
@@ -1753,7 +1885,7 @@ export default function App() {
     }
 
     return { status: 'none', code: '-', label: 'Absent / Off', punches: [] };
-  }, [timesheetMonthRecordsMap, isMissedCheckoutRecord]);
+  }, [timesheetMonthRecordsMap, isMissedCheckoutRecord, sanitizeDayPunches]);
 
   // Employee monthly totals calculation
   const getEmployeeTimesheetTotals = useCallback((empName) => {
@@ -1941,12 +2073,12 @@ export default function App() {
     setPayrollCalMonth(now.getMonth());
   };
 
-  // Set of lowercase active employee names (excludes deleted employees)
+  // Set of normalized lowercase active employee names (excludes deleted employees)
   const activeEmployeeNamesSet = useMemo(() => {
     const set = new Set();
     branches.forEach(b => {
       (b.employees || []).forEach(emp => {
-        const name = (typeof emp === 'string' ? emp : emp.name || '').trim().toLowerCase();
+        const name = normalizeEmpName(typeof emp === 'string' ? emp : emp.name);
         if (name) set.add(name);
       });
     });
@@ -1962,8 +2094,7 @@ export default function App() {
     }
 
     records.forEach(r => {
-      const empName = (r.employeeName || r.name || '').trim().toLowerCase();
-      // Exclude deleted employees
+      const empName = normalizeEmpName(r.employeeName || r.name);
       if (!empName || !activeEmployeeNamesSet.has(empName)) return;
 
       const comp = getRecordDateComponents(r);
@@ -1990,16 +2121,16 @@ export default function App() {
 
     punches.forEach(p => {
       const empName = (p.employeeName || p.name || '').trim();
+      const empKey = normalizeEmpName(empName);
       const bName = (p.branchName || 'Convenio Mart').trim();
-      if (empName) staffSet.add(empName.toLowerCase());
+      if (empKey) staffSet.add(empKey);
 
       if (!branchMap[bName]) {
         branchMap[bName] = { name: bName, staffMap: {}, punchesCount: 0 };
       }
       branchMap[bName].punchesCount++;
 
-      if (empName) {
-        const empKey = empName.toLowerCase();
+      if (empKey) {
         if (!branchMap[bName].staffMap[empKey]) {
           branchMap[bName].staffMap[empKey] = {
             name: empName,
@@ -2092,23 +2223,24 @@ export default function App() {
   // Helper to compute live/historical shift progress against 9-hour target for an employee on a given day
   const getEmployeeShiftMetrics = useCallback((empName, dateStr = null, refPunches = null) => {
     if (!empName) return null;
-    const targetName = empName.trim().toLowerCase();
+    const targetName = normalizeEmpName(empName);
+    const targetYMD = dateStr ? formatPartsToYMD(parseCalendarDateParts(dateStr)) : '';
 
-    // Source punches: passed directly, or filtered by date (or today's punches if dateStr is null)
-    const dayPunches = (refPunches || records).filter(r => {
-      const eName = (r.employeeName || r.name || '').trim().toLowerCase();
-      const matchName = eName === targetName || eName.includes(targetName) || targetName.includes(eName);
-      if (!matchName) return false;
+    const rawDayPunches = (refPunches || records).filter(r => {
+      const eName = normalizeEmpName(r.employeeName || r.name);
+      if (eName !== targetName) return false;
       if (dateStr) {
-        return r.date === dateStr;
+        if (r.date === dateStr) return true;
+        if (targetYMD) {
+          const recYMD = formatPartsToYMD(parseCalendarDateParts(r.date));
+          return recYMD === targetYMD;
+        }
+        return false;
       }
       return isRecordToday(r);
-    }).sort((a, b) => {
-      const tsA = a.timestamp || (a.id && a.id.startsWith('REC-') ? Number(a.id.slice(4)) || 0 : 0);
-      const tsB = b.timestamp || (b.id && b.id.startsWith('REC-') ? Number(b.id.slice(4)) || 0 : 0);
-      return tsA - tsB;
     });
 
+    const dayPunches = sanitizeDayPunches(rawDayPunches);
     if (dayPunches.length === 0) return null;
 
     const firstIn = dayPunches.find(p => p.type === 'in');
@@ -2117,18 +2249,11 @@ export default function App() {
     const lastOut = [...dayPunches].reverse().find(p => p.type === 'out');
     const isOngoing = !lastOut;
 
-    // Helper to get time in minutes
     const getMinutes = (p) => {
-      if (p.timestamp && !isNaN(Number(p.timestamp))) {
-        const d = new Date(Number(p.timestamp));
+      const ms = getRecordSortMs(p);
+      if (ms > 0) {
+        const d = new Date(ms);
         return d.getHours() * 60 + d.getMinutes();
-      }
-      if (p.id && p.id.startsWith('REC-') && !p.id.startsWith('REC-AUTO')) {
-        const num = Number(p.id.slice(4));
-        if (!isNaN(num) && num > 1600000000000) {
-          const d = new Date(num);
-          return d.getHours() * 60 + d.getMinutes();
-        }
       }
       const tStr = p.shortTime || p.time;
       if (tStr) {
@@ -2153,7 +2278,7 @@ export default function App() {
       endMin = getMinutes(lastOut);
       if (endMin === null || endMin < inMin) endMin = inMin;
     } else {
-      const now = new Date();
+      const now = getServerNow();
       endMin = now.getHours() * 60 + now.getMinutes();
       if (endMin < inMin) endMin = inMin;
     }
@@ -2186,7 +2311,7 @@ export default function App() {
       firstInTime: firstIn.shortTime || firstIn.time,
       lastOutTime: lastOut ? (lastOut.shortTime || lastOut.time) : null
     };
-  }, [records]);
+  }, [records, isRecordToday, sanitizeDayPunches]);
 
   // Open Day Drilldown Modal
   const handleOpenPayrollDateModal = (day) => {
@@ -2207,11 +2332,9 @@ export default function App() {
     const { year, month, day, dateStr } = payrollSelectedDateModal;
     const punches = payrollMonthDaysMap[day] || [];
 
-    // Group all punches of this day by branch
     const branchGroups = [];
     const knownBranchMap = new Map();
 
-    // Seed all active branches configured in system
     branches.forEach(b => {
       knownBranchMap.set(b.name.trim().toLowerCase(), {
         id: b.id,
@@ -2239,18 +2362,17 @@ export default function App() {
       knownBranchMap.get(bKey).totalPunches++;
     });
 
-    // Group employee punches inside each branch (Strictly active registered employees only)
     knownBranchMap.forEach((branchObj, bKey) => {
       const branchPunches = punches.filter(p => {
-        const empName = (p.employeeName || p.name || '').trim().toLowerCase();
+        const empName = normalizeEmpName(p.employeeName || p.name);
         return (p.branchName || '').trim().toLowerCase() === bKey && activeEmployeeNamesSet.has(empName);
       });
       const empMap = new Map();
 
       branchPunches.forEach(p => {
         const empName = (p.employeeName || p.name || '').trim();
-        const empKey = empName.toLowerCase();
-        if (!empName || !activeEmployeeNamesSet.has(empKey)) return;
+        const empKey = normalizeEmpName(empName);
+        if (!empKey || !activeEmployeeNamesSet.has(empKey)) return;
         if (!empMap.has(empKey)) {
           empMap.set(empKey, {
             name: empName,
@@ -2262,34 +2384,7 @@ export default function App() {
       });
 
       const staffList = Array.from(empMap.values()).map(staff => {
-        // Sort punches chronologically
-        const sorted = [...staff.punches].sort((a, b) => {
-          const getExactTs = (rec) => {
-            if (rec.id && rec.id.startsWith('REC-') && !rec.id.startsWith('REC-AUTO')) {
-              const num = Number(rec.id.slice(4));
-              if (!isNaN(num) && num > 1600000000000) return num;
-            }
-            if (rec.timestamp && !isNaN(Number(rec.timestamp))) return Number(rec.timestamp);
-            if (rec.created_at && !rec.id?.startsWith('REC-AUTO')) {
-              const t = new Date(rec.created_at).getTime();
-              if (!isNaN(t)) return t;
-            }
-            if (rec.shortTime || rec.time) {
-              const tStr = rec.shortTime || rec.time;
-              const m = String(tStr).match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)/i);
-              if (m) {
-                let h = parseInt(m[1], 10);
-                const mins = parseInt(m[2], 10);
-                const ampm = m[3].toUpperCase();
-                if (ampm === 'PM' && h < 12) h += 12;
-                if (ampm === 'AM' && h === 12) h = 0;
-                return h * 60 + mins;
-              }
-            }
-            return 0;
-          };
-          return getExactTs(a) - getExactTs(b);
-        });
+        const sorted = sanitizeDayPunches(staff.punches);
 
         const firstIn = sorted.find(p => p.type === 'in');
         const lastOut = [...sorted].reverse().find(p => p.type === 'out');
@@ -2313,7 +2408,6 @@ export default function App() {
       branchGroups.push(branchObj);
     });
 
-    // Sort: Branches with attendance first, then alphabetically
     branchGroups.sort((a, b) => {
       if (b.staffPresentList.length !== a.staffPresentList.length) {
         return b.staffPresentList.length - a.staffPresentList.length;
@@ -2321,7 +2415,7 @@ export default function App() {
       return a.name.localeCompare(b.name);
     });
 
-    const totalStaffPresent = new Set(punches.map(p => (p.employeeName || p.name || '').trim().toLowerCase()).filter(Boolean)).size;
+    const totalStaffPresent = new Set(punches.map(p => normalizeEmpName(p.employeeName || p.name)).filter(Boolean)).size;
     const branchesActiveCount = branchGroups.filter(b => b.staffPresentList.length > 0).length;
 
     return {
@@ -2335,7 +2429,7 @@ export default function App() {
       totalConfiguredBranches: branches.length,
       branchGroups
     };
-  }, [payrollSelectedDateModal, payrollMonthDaysMap, branches, isMissedCheckoutRecord]);
+  }, [payrollSelectedDateModal, payrollMonthDaysMap, branches, isMissedCheckoutRecord, sanitizeDayPunches, activeEmployeeNamesSet]);
 
   // Quick CSV export for the selected day drilldown (Payroll Audit)
   const handleExportDailyPayrollCSV = () => {
@@ -2430,17 +2524,16 @@ export default function App() {
       return { status: 'none', label: 'No Data', punches: [] };
     }
 
-    const empTarget = calendarStaff.name.toLowerCase().trim();
-    const dayPunches = records.filter(r => {
-      const empName = (r.employeeName || r.name || '').toLowerCase().trim();
-      if (empName !== empTarget && !empName.includes(empTarget) && !empTarget.includes(empName)) {
-        return false;
-      }
+    const empTarget = normalizeEmpName(calendarStaff.name);
+    const rawDayPunches = records.filter(r => {
+      const empName = normalizeEmpName(r.employeeName || r.name);
+      if (empName !== empTarget) return false;
       const comp = getRecordDateComponents(r);
       return comp && comp.year === calendarYear && comp.month === calendarMonth && comp.day === day;
     });
 
-    if (dayPunches.length > 0) {
+    if (rawDayPunches.length > 0) {
+      const dayPunches = sanitizeDayPunches(rawDayPunches);
       const hasMissed = dayPunches.some(p => isMissedCheckoutRecord(p));
       const hasIn = dayPunches.some(p => p.type === 'in');
       const hasOut = dayPunches.some(p => p.type === 'out' && !isMissedCheckoutRecord(p));
@@ -2484,7 +2577,7 @@ export default function App() {
     } else {
       return { status: 'future', label: 'Upcoming', punches: [] };
     }
-  }, [calendarStaff, calendarYear, calendarMonth, records, getRecordDateComponents, isMissedCheckoutRecord]);
+  }, [calendarStaff, calendarYear, calendarMonth, records, getRecordDateComponents, isMissedCheckoutRecord, sanitizeDayPunches]);
 
   // Download Individual Staff Monthly Attendance Report as PDF
   const handleDownloadStaffMonthlyPDF = () => {
@@ -2991,7 +3084,9 @@ export default function App() {
   };
 
   // ================= ATTENDANCE CHECK IN / OUT ACTION =================
-  const handleActionClick = (actionType) => {
+  const handleActionClick = async (actionType) => {
+    if (isVerifyingAction) return;
+
     if (geoStatus !== 'in_range') {
       setFormValidationMsg('You must be within 50 meters of a Convenio Mart branch to mark attendance.');
       return;
@@ -3017,31 +3112,60 @@ export default function App() {
     }
 
     const empName = currentFormEmployee.name;
+    const empNorm = normalizeEmpName(empName);
+    let effectiveRecords = records;
 
-    // Guardrail: Strict checkout check - cannot Check Out without an active Check In today
+    // Live verify against Supabase (< 3 KB) whenever checking out without a local Check-In
+    // or checking in when local state looks blocked, so stale PWA cache / cross-device punches never block checkout!
+    if ((actionType === 'out' && latestTodayRecord?.type !== 'in') || actionType === 'in') {
+      setIsVerifyingAction(true);
+      try {
+        const recent = await fetchRecentAttendanceFromSupabase(36);
+        if (recent !== null) {
+          effectiveRecords = mergeAttendanceRecords(
+            [
+              ...recent,
+              ...records.filter(oldRec => !recent.some(r => r.id === oldRec.id) && (Date.now() - getRecordSortMs(oldRec) >= 35 * 3600 * 1000))
+            ],
+            records
+          );
+          setRecords(effectiveRecords);
+        }
+      } catch (err) {
+        console.warn('Live punch verify fallback to local state:', err);
+      } finally {
+        setIsVerifyingAction(false);
+      }
+    }
+
+    const empTodayRecs = effectiveRecords.filter(r => normalizeEmpName(r.employeeName || r.name) === empNorm && isRecordToday(r));
+    const manualTodayRecs = empTodayRecs.filter(r => !isMissedCheckoutRecordUtil(r));
+    manualTodayRecs.sort((a, b) => getRecordSortMs(b) - getRecordSortMs(a));
+    const liveLatest = manualTodayRecs[0] || empTodayRecs[0] || null;
+
+    // Guardrail: Strict checkout check - cannot Check Out without an active manual Check In today
     if (actionType === 'out') {
-      if (!latestTodayRecord) {
+      if (!liveLatest || (isMissedCheckoutRecordUtil(liveLatest) && !manualTodayRecs.some(r => r.type === 'in'))) {
         setFormValidationMsg(`Cannot Check Out: No morning Check In recorded for ${empName} today. Please tap Check In first.`);
         return;
       }
-      if (latestTodayRecord.type === 'out') {
-        setFormValidationMsg(`${empName} is already checked out today at ${formatTo12HourTime(latestTodayRecord.shortTime || latestTodayRecord.time)}.`);
+      if (!isMissedCheckoutRecordUtil(liveLatest) && liveLatest.type === 'out') {
+        setFormValidationMsg(`${empName} is already checked out today at ${formatTo12HourTime(liveLatest.shortTime || liveLatest.time)}.`);
         return;
       }
     }
 
     // Guardrail: Cannot Check In if already checked in
-    if (actionType === 'in' && latestTodayRecord?.type === 'in') {
-      setFormValidationMsg(`${empName} is already checked in today at ${formatTo12HourTime(latestTodayRecord.shortTime || latestTodayRecord.time)}. Tap Check Out when leaving.`);
+    if (actionType === 'in' && liveLatest?.type === 'in') {
+      setFormValidationMsg(`${empName} is already checked in today at ${formatTo12HourTime(liveLatest.shortTime || liveLatest.time)}. Tap Check Out when leaving.`);
       return;
     }
 
     // Smart Shift Check: Early Checkout Confirmation if worked less than 9 hours
-    if (actionType === 'out' && latestTodayRecord?.type === 'in') {
+    if (actionType === 'out' && liveLatest?.type === 'in') {
       try {
-        const shiftMetrics = getEmployeeShiftMetrics(empName, null);
+        const shiftMetrics = getEmployeeShiftMetrics(empName, null, effectiveRecords);
         if (shiftMetrics && !shiftMetrics.isTargetMet) {
-          // Trigger smart confirmation modal instead of proceeding silently
           setEarlyCheckoutWarning({
             employeeName: empName,
             shiftMetrics,
@@ -3214,9 +3338,14 @@ export default function App() {
       const defaultLng = geoData?.userLng != null ? Number(geoData.userLng.toFixed(6)) : null;
       const defaultPlace = activeBranchName ? `${activeBranchName} (Geofence Verified)` : 'Live GPS Verified';
 
+      let recordFinished = false;
       const finishRecord = (locationData) => {
+        if (recordFinished) return;
+        recordFinished = true;
+
         const isGeofenceOk = geoStatus === 'in_range';
         const verifiedDistance = geoData?.distanceMeters != null ? geoData.distanceMeters : null;
+        const punchPhoto = finalPhoto || capturedPhoto;
 
         const newRecord = {
           id: 'REC-' + now.getTime(),
@@ -3229,13 +3358,36 @@ export default function App() {
           date: formattedDate,
           time: formattedTime,
           shortTime,
-          photo: finalPhoto || capturedPhoto,
+          photo: punchPhoto,
           geofenceVerified: isGeofenceOk,
           distanceMeters: verifiedDistance,
           location: locationData
         };
 
-        setRecords((prev) => [newRecord, ...prev]);
+        if (punchPhoto) {
+          setLazyPhotoMap(prev => ({ ...prev, [newRecord.id]: punchPhoto }));
+        }
+
+        // If checking out manually late at night after auto-checkout fired, supersede today's auto missed-checkout row
+        const empNorm = normalizeEmpName(activeEmpName);
+        const supersededAutoIds = currentActionType === 'out'
+          ? records
+              .filter(r => isMissedCheckoutRecordUtil(r) && normalizeEmpName(r.employeeName || r.name) === empNorm && isRecordToday(r))
+              .map(r => r.id)
+              .filter(Boolean)
+          : [];
+
+        setRecords((prev) => {
+          const cleaned = supersededAutoIds.length > 0
+            ? prev.filter(r => !supersededAutoIds.includes(r.id))
+            : prev;
+          return [newRecord, ...cleaned];
+        });
+
+        if (supersededAutoIds.length > 0) {
+          deleteAttendanceIdsFromSupabase(supersededAutoIds);
+        }
+
         saveAttendanceToSupabase(newRecord)
           .then((ok) => {
             if (!ok) {
@@ -3264,7 +3416,7 @@ export default function App() {
           lng: locationData.lng,
           placeName: locationData.placeName,
           mapUrl: locationData.lat ? `https://www.google.com/maps?q=${locationData.lat},${locationData.lng}` : null,
-          photo: finalPhoto || capturedPhoto,
+          photo: punchPhoto,
           name: activeEmpName,
           branch: activeBranchName,
           role: activeEmpRole,
@@ -3274,6 +3426,15 @@ export default function App() {
       };
 
       if ('geolocation' in navigator) {
+        // Hard safety guard in case Android WebView drops GPS callback cleanly
+        const hardTimeoutId = setTimeout(() => {
+          finishRecord({
+            lat: defaultLat,
+            lng: defaultLng,
+            placeName: defaultLat != null ? defaultPlace : 'GPS timeout fallback'
+          });
+        }, 4800);
+
         navigator.geolocation.getCurrentPosition(
           async (position) => {
             const lat = position.coords.latitude;
@@ -3282,7 +3443,7 @@ export default function App() {
 
             try {
               const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-              const timeoutId = controller ? setTimeout(() => controller.abort(), 3000) : null;
+              const timeoutId = controller ? setTimeout(() => controller.abort(), 2200) : null;
               const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`, {
                 headers: { 'Accept-Language': 'en' },
                 ...(controller ? { signal: controller.signal } : {})
@@ -3298,6 +3459,7 @@ export default function App() {
               // fallback
             }
 
+            clearTimeout(hardTimeoutId);
             finishRecord({
               lat: Number(lat.toFixed(6)),
               lng: Number(lng.toFixed(6)),
@@ -3305,13 +3467,14 @@ export default function App() {
             });
           },
           () => {
+            clearTimeout(hardTimeoutId);
             finishRecord({
               lat: defaultLat,
               lng: defaultLng,
               placeName: defaultLat != null ? defaultPlace : 'GPS permission unavailable'
             });
           },
-          { enableHighAccuracy: true, timeout: 5000, maximumAge: 15000 }
+          { enableHighAccuracy: true, timeout: 3500, maximumAge: 30000 }
         );
       } else {
         finishRecord({
@@ -3352,11 +3515,15 @@ export default function App() {
   // Robust extractor for record date in YYYY-MM-DD format
   const getRecordISODate = (r) => {
     if (!r) return '';
+    if (r.date) {
+      const parts = parseCalendarDateParts(r.date);
+      if (parts) return formatPartsToYMD(parts);
+    }
     if (r.timestamp && !isNaN(Number(r.timestamp))) {
       const d = new Date(Number(r.timestamp));
       if (!isNaN(d.getTime())) return toYMD(d);
     }
-    if (r.id && typeof r.id === 'string' && r.id.startsWith('REC-')) {
+    if (r.id && typeof r.id === 'string' && r.id.startsWith('REC-') && !r.id.startsWith('REC-AUTO')) {
       const ts = Number(r.id.slice(4));
       if (!isNaN(ts) && ts > 1600000000000) {
         const d = new Date(ts);
@@ -3365,10 +3532,6 @@ export default function App() {
     }
     if (r.created_at) {
       const d = new Date(r.created_at);
-      if (!isNaN(d.getTime())) return toYMD(d);
-    }
-    if (r.date) {
-      const d = new Date(r.date);
       if (!isNaN(d.getTime())) return toYMD(d);
     }
     return '';
@@ -3489,13 +3652,34 @@ export default function App() {
     setTimeout(() => setCopiedRecordId(null), 2000);
   };
 
-  // Attendance Records Filtered
+  // Attendance Records Filtered (suppresses redundant REC-AUTO when employee actually checked out manually)
   const filteredRecords = useMemo(() => {
-    const search = searchTerm.toLowerCase();
+    const manualCloseMap = new Map();
+    records.forEach(r => {
+      if (isMissedCheckoutRecordUtil(r)) return;
+      const empKey = normalizeEmpName(r.employeeName || r.name);
+      const ymd = getRecordISODate(r);
+      if (!empKey || !ymd) return;
+      const key = `${empKey}___${ymd}`;
+      const prev = manualCloseMap.get(key);
+      if (!prev || getRecordSortMs(r) > getRecordSortMs(prev)) {
+        manualCloseMap.set(key, r);
+      }
+    });
+
+    const search = normalizeEmpName(searchTerm);
     return records.filter((r) => {
+      if (isMissedCheckoutRecordUtil(r)) {
+        const key = `${normalizeEmpName(r.employeeName || r.name)}___${getRecordISODate(r)}`;
+        const lastManual = manualCloseMap.get(key);
+        if (lastManual && lastManual.type === 'out') {
+          return false;
+        }
+      }
+
       const matchesSearch = 
         !search ||
-        r.employeeName.toLowerCase().includes(search) ||
+        normalizeEmpName(r.employeeName).includes(search) ||
         (r.branchName && r.branchName.toLowerCase().includes(search)) ||
         (r.location?.placeName && r.location.placeName.toLowerCase().includes(search)) ||
         (r.location?.lat && String(r.location.lat).includes(search)) ||
@@ -3532,6 +3716,37 @@ export default function App() {
   const paginatedRecords = useMemo(() => {
     return filteredRecords.slice(startIndex, endIndex);
   }, [filteredRecords, startIndex, endIndex]);
+
+  // Lazy-load selfie photos on-demand ONLY for currently visible rows / open modals (keeps startup 180x lighter!)
+  useEffect(() => {
+    const candidateIds = new Set();
+    if (view === 'admin' && adminTab === 'logs') {
+      paginatedRecords.forEach(r => { if (r?.id) candidateIds.add(r.id); });
+    }
+    if (showHistoryDrawer) {
+      todayRecords.forEach(r => { if (r?.id) candidateIds.add(r.id); });
+    }
+    if (selectedRecord?.id) candidateIds.add(selectedRecord.id);
+    if (viewingPhoto?.id) candidateIds.add(viewingPhoto.id);
+
+    const missingIds = Array.from(candidateIds).filter(id => {
+      if (String(id).startsWith('REC-AUTO')) return false;
+      if (lazyPhotoMap[id]) return false;
+      const rec = records.find(r => r.id === id);
+      return !(rec && rec.photo);
+    });
+
+    if (missingIds.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      const photoMap = await fetchAttendancePhotosByIds(missingIds.slice(0, 30));
+      if (!cancelled && photoMap && Object.keys(photoMap).length > 0) {
+        setLazyPhotoMap(prev => ({ ...prev, ...photoMap }));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [view, adminTab, paginatedRecords, showHistoryDrawer, todayRecords, selectedRecord, viewingPhoto, lazyPhotoMap, records]);
 
   const totalEmployeesCount = useMemo(() => {
     return branches.reduce((acc, b) => acc + (b.employees ? b.employees.length : 0), 0);
@@ -4002,7 +4217,7 @@ export default function App() {
                     id="btn-check-in"
                     className={`clean-btn clean-btn-in ${latestTodayRecord?.type === 'in' ? 'btn-dimmed-secondary' : ''}`}
                     onClick={() => handleActionClick('in')}
-                    disabled={!currentFormEmployee || latestTodayRecord?.type === 'in'}
+                    disabled={!currentFormEmployee || isVerifyingAction}
                     title={
                       !currentFormEmployee
                         ? (typedEmpName.trim() && matchedCompanyEmployees.length > 1
@@ -4014,32 +4229,32 @@ export default function App() {
                     }
                   >
                     <LogIn size={18} />
-                    <span>Check In</span>
-                    {(!latestTodayRecord || latestTodayRecord?.type === 'out') && (
+                    <span>{isVerifyingAction ? 'Checking...' : 'Check In'}</span>
+                    {(!latestTodayRecord || latestTodayRecord?.type === 'out') && !isVerifyingAction && (
                       <span className="action-tag-pill">Start</span>
                     )}
                   </button>
 
                   <button 
                     id="btn-check-out"
-                    className={`clean-btn clean-btn-out ${latestTodayRecord?.type === 'in' ? 'btn-highlighted-action' : ''}`}
+                    className={`clean-btn clean-btn-out ${latestTodayRecord?.type === 'in' ? 'btn-highlighted-action' : 'btn-dimmed-secondary'}`}
                     onClick={() => handleActionClick('out')}
-                    disabled={!currentFormEmployee || latestTodayRecord?.type !== 'in'}
+                    disabled={!currentFormEmployee || isVerifyingAction}
                     title={
                       !currentFormEmployee
                         ? (typedEmpName.trim() && matchedCompanyEmployees.length > 1
                             ? 'Please select which employee you are before checking out'
                             : 'Select or verify your registered name from employee list to check out')
                         : !latestTodayRecord
-                        ? 'Cannot check out without checking in first'
+                        ? 'Tap to verify Check-In status and Check Out'
                         : latestTodayRecord?.type === 'out'
                         ? `${activeFormEmpName} is already checked out today`
                         : 'Record Check Out (Shift active)'
                     }
                   >
                     <LogOut size={18} />
-                    <span>Check Out</span>
-                    {latestTodayRecord?.type === 'in' && (
+                    <span>{isVerifyingAction ? 'Checking...' : 'Check Out'}</span>
+                    {latestTodayRecord?.type === 'in' && !isVerifyingAction && (
                       <span className="action-tag-pill tag-pill-checkout">End Shift</span>
                     )}
                   </button>
@@ -5117,8 +5332,8 @@ export default function App() {
                               }}
                               title="Click to view full photo"
                             >
-                              {item.photo ? (
-                                <img src={item.photo} alt="Selfie" className="selfie-thumbnail" loading="lazy" decoding="async" width="40" height="40" />
+                              {getRecordPhoto(item) ? (
+                                <img src={getRecordPhoto(item)} alt="Selfie" className="selfie-thumbnail" loading="lazy" decoding="async" width="40" height="40" />
                               ) : (
                                 <div className="no-photo"><Camera size={16} /></div>
                               )}
@@ -6276,8 +6491,8 @@ export default function App() {
                             title="Click to view full attendance verification receipt"
                           >
                             <div className="history-log-avatar">
-                              {item.photo ? (
-                                <img src={item.photo} alt={item.employeeName} className="history-log-thumb" loading="lazy" decoding="async" width="38" height="38" />
+                              {getRecordPhoto(item) ? (
+                                <img src={getRecordPhoto(item)} alt={item.employeeName} className="history-log-thumb" loading="lazy" decoding="async" width="38" height="38" />
                               ) : (
                                 <span className="history-log-initial">
                                   {item.employeeName ? item.employeeName.charAt(0).toUpperCase() : 'U'}
@@ -7189,20 +7404,20 @@ export default function App() {
                 <div 
                   className={`receipt-avatar-wrapper ${selectedRecord.disablePhotoZoom ? 'no-zoom' : ''}`}
                   onClick={() => {
-                    if (!selectedRecord.disablePhotoZoom && selectedRecord.photo) {
+                    if (!selectedRecord.disablePhotoZoom && getRecordPhoto(selectedRecord)) {
                       setViewingPhoto(selectedRecord);
                     }
                   }}
                   title={selectedRecord.disablePhotoZoom ? selectedRecord.employeeName : "Click to view full photo"}
                 >
-                  {selectedRecord.photo ? (
-                    <img src={selectedRecord.photo} alt={selectedRecord.employeeName} className="receipt-avatar-img" decoding="async" width="60" height="60" />
+                  {getRecordPhoto(selectedRecord) ? (
+                    <img src={getRecordPhoto(selectedRecord)} alt={selectedRecord.employeeName} className="receipt-avatar-img" decoding="async" width="60" height="60" />
                   ) : (
                     <div className="receipt-avatar-initial" style={{ width: 60, height: 60, borderRadius: 12, background: '#fee2e2', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '1.4rem' }}>
                       {selectedRecord.employeeName ? selectedRecord.employeeName.charAt(0).toUpperCase() : 'U'}
                     </div>
                   )}
-                  {!selectedRecord.disablePhotoZoom && selectedRecord.photo && (
+                  {!selectedRecord.disablePhotoZoom && getRecordPhoto(selectedRecord) && (
                     <div className="receipt-zoom-hint">
                       <Eye size={16} />
                     </div>
@@ -7352,7 +7567,11 @@ export default function App() {
               </button>
             </div>
             <div className="photo-full-body">
-              <img src={viewingPhoto.photo} alt="Photo Full" className="full-size-selfie" decoding="async" />
+              {getRecordPhoto(viewingPhoto) ? (
+                <img src={getRecordPhoto(viewingPhoto)} alt="Photo Full" className="full-size-selfie" decoding="async" />
+              ) : (
+                <div className="no-photo" style={{ padding: '2rem', color: '#64748b' }}>Loading photo...</div>
+              )}
             </div>
           </div>
         </div>
@@ -8303,13 +8522,6 @@ export default function App() {
             <div className="early-checkout-actions">
               <button 
                 type="button" 
-                className="btn-continue-work"
-                onClick={() => setEarlyCheckoutWarning(null)}
-              >
-                <span>Continue Working</span>
-              </button>
-              <button 
-                type="button" 
                 className="btn-confirm-early-out"
                 onClick={() => {
                   if (earlyCheckoutWarning.onConfirm) {
@@ -8317,7 +8529,14 @@ export default function App() {
                   }
                 }}
               >
-                <span>Check Out Early</span>
+                <span>Yes, Check Out Now</span>
+              </button>
+              <button 
+                type="button" 
+                className="btn-continue-work"
+                onClick={() => setEarlyCheckoutWarning(null)}
+              >
+                <span>Cancel — Continue Working</span>
               </button>
             </div>
           </div>
