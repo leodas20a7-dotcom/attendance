@@ -551,7 +551,14 @@ export default function App() {
   const [isCameraLoading, setIsCameraLoading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isVerifyingAction, setIsVerifyingAction] = useState(false);
-  const [lazyPhotoMap, setLazyPhotoMap] = useState({});
+  const [lazyPhotoMap, setLazyPhotoMap] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('convenio_session_photos');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
 
   const cloudSyncedRef = useRef(false);
   const lastCloudRefreshMsRef = useRef(0);
@@ -714,16 +721,24 @@ export default function App() {
   // Admin search inside employee roster
   const [adminEmpSearch, setAdminEmpSearch] = useState('');
 
-  // Device Telemetry Sync Handler (logs device info & version adoption)
+  const telemetryMetaRef = useRef({ branches, selectedBranchId, typedEmpName });
+  telemetryMetaRef.current = { branches, selectedBranchId, typedEmpName };
+
+  // Device Telemetry Sync Handler (throttled to avoid redundant Supabase writes)
   const reportDeviceTelemetry = useCallback(async (actionName = 'launch') => {
     try {
+      const sessionKey = `convenio_telemetry_sent_${CURRENT_APP_VERSION}`;
+      if (actionName === 'active_session') {
+        const lastSent = Number(sessionStorage.getItem(sessionKey) || 0);
+        if (lastSent > 0 && Date.now() - lastSent < 30 * 60 * 1000) return;
+      }
+
       const dev = getDeviceInfo();
       const standalone = isAppInstalled();
       const platformDesc = dev.isAndroid ? 'Android' : dev.isIOS ? 'iOS' : 'Desktop';
       const modeDesc = standalone ? 'PWA Standalone' : 'Browser';
       const summary = `${platformDesc} (${modeDesc})`;
 
-      // Stable device fingerprint: Platform + Standalone Mode (1 unique record per browser/device)
       let localDevToken = localStorage.getItem('convenio_device_token');
       if (!localDevToken) {
         localDevToken = 'tok_' + Math.random().toString(36).substring(2, 8);
@@ -731,9 +746,9 @@ export default function App() {
       }
 
       const deviceId = `dev_${platformDesc.toLowerCase()}_${standalone ? 'pwa' : 'web'}_${localDevToken}`;
-
-      const activeBranch = branches.find(b => b.id === selectedBranchId)?.name || 'Convenio Mart';
-      const activeEmp = (typedEmpName || '').trim() || 'Kiosk Device';
+      const meta = telemetryMetaRef.current;
+      const activeBranch = meta.branches.find(b => b.id === meta.selectedBranchId)?.name || 'Convenio Mart';
+      const activeEmp = (meta.typedEmpName || '').trim() || 'Kiosk Device';
 
       const telemetryObj = {
         id: deviceId,
@@ -749,10 +764,9 @@ export default function App() {
         time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
       };
 
-      // 1. Send to Supabase
       await syncDeviceTelemetryToSupabase(telemetryObj);
+      try { sessionStorage.setItem(sessionKey, String(Date.now())); } catch {}
 
-      // 2. Local fallback log in admin actions if updated
       if (actionName === 'updated') {
         logAdminAction('system', `Device updated to ${CURRENT_APP_VERSION}`, {
           device: summary,
@@ -763,7 +777,7 @@ export default function App() {
     } catch (e) {
       console.warn('Telemetry report error:', e);
     }
-  }, [branches, selectedBranchId, typedEmpName]);
+  }, []);
 
   // Load telemetry records when opening version audit modal
   const loadDeviceTelemetry = async () => {
@@ -955,25 +969,42 @@ export default function App() {
     return freshRecords;
   }, []);
 
-  // Lightweight refresh (~75 KB without photos) used on boot, PWA resume/focus, and interval
-  const refreshAttendanceFromCloud = useCallback(async ({ force = false, silent = true } = {}) => {
+  // Ultra-low-egress refresh: fetches only latest 50 rows (~12 KB) on staff kiosks, or full list on Admin portal
+  const refreshAttendanceFromCloud = useCallback(async ({ force = false, silent = true, fullHistory = false } = {}) => {
     const nowMs = Date.now();
-    if (!force && nowMs - lastCloudRefreshMsRef.current < 8000) return null;
+    if (!force && nowMs - lastCloudRefreshMsRef.current < 30000) return null;
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return null;
 
     if (!silent) setIsSyncing(true);
     try {
-      const cloudRecords = await fetchAttendanceFromSupabase({ includePhotos: false });
-      if (cloudRecords !== null) {
-        lastCloudRefreshMsRef.current = Date.now();
-        cloudSyncedRef.current = true;
-        const checkedCloud = applyMissedCheckoutsOnFreshCloud(cloudRecords);
-        setRecords(prev => {
-          const merged = mergeAttendanceRecords(checkedCloud, prev);
-          safeCacheRecords(merged);
-          return merged;
-        });
-        return checkedCloud;
+      if (fullHistory || view === 'admin') {
+        const cloudRecords = await fetchAttendanceFromSupabase({ includePhotos: false });
+        if (cloudRecords !== null) {
+          lastCloudRefreshMsRef.current = Date.now();
+          cloudSyncedRef.current = true;
+          const checkedCloud = applyMissedCheckoutsOnFreshCloud(cloudRecords);
+          setRecords(prev => {
+            const merged = mergeAttendanceRecords(checkedCloud, prev);
+            safeCacheRecords(merged);
+            return merged;
+          });
+          return checkedCloud;
+        }
+      } else {
+        const recent = await fetchRecentAttendanceFromSupabase(50);
+        if (recent !== null) {
+          lastCloudRefreshMsRef.current = Date.now();
+          setRecords(prev => {
+            const combined = [
+              ...recent,
+              ...prev.filter(oldRec => !recent.some(r => r.id === oldRec.id))
+            ];
+            const merged = mergeAttendanceRecords(combined, prev);
+            safeCacheRecords(merged);
+            return merged;
+          });
+          return recent;
+        }
       }
       return null;
     } catch (err) {
@@ -982,7 +1013,7 @@ export default function App() {
     } finally {
       if (!silent) setIsSyncing(false);
     }
-  }, [applyMissedCheckoutsOnFreshCloud, mergeAttendanceRecords, safeCacheRecords]);
+  }, [view, applyMissedCheckoutsOnFreshCloud, mergeAttendanceRecords, safeCacheRecords]);
 
   // Connect and sync with Supabase on mount
   useEffect(() => {
@@ -1043,7 +1074,7 @@ export default function App() {
     initSupabase();
   }, [applyMissedCheckoutsOnFreshCloud, mergeAttendanceRecords, safeCacheRecords]);
 
-  // Auto-refresh lightweight attendance whenever PWA resumes from background, regains focus, or ticks 90s
+  // Auto-refresh lightweight attendance whenever PWA resumes from background or regains focus (throttled to save egress)
   useEffect(() => {
     const handleWake = () => {
       if (document.visibilityState === 'visible') {
@@ -1056,7 +1087,7 @@ export default function App() {
       if (document.visibilityState === 'visible') {
         refreshAttendanceFromCloud({ silent: true });
       }
-    }, 90000);
+    }, 180000);
 
     return () => {
       document.removeEventListener('visibilitychange', handleWake);
@@ -3342,8 +3373,8 @@ export default function App() {
     const canvas = canvasRef.current;
     const rawSize = Math.min(video.videoWidth, video.videoHeight) || 640;
 
-    // Direct scale-down to 480px for instant light memory preview and small payload
-    const targetSize = Math.min(rawSize, 480);
+    // Direct scale-down to 380px, JPEG 0.64 (~12-18 KB) for ultra-low database egress
+    const targetSize = Math.min(rawSize, 380);
     canvas.width = targetSize;
     canvas.height = targetSize;
     const ctx = canvas.getContext('2d');
@@ -3360,7 +3391,7 @@ export default function App() {
     const startY = (video.videoHeight - rawSize) / 2;
 
     ctx.drawImage(video, startX, startY, rawSize, rawSize, 0, 0, targetSize, targetSize);
-    const photoDataUrl = canvas.toDataURL('image/jpeg', 0.72);
+    const photoDataUrl = canvas.toDataURL('image/jpeg', 0.64);
     setCapturedPhoto(photoDataUrl);
   };
 
@@ -3374,8 +3405,8 @@ export default function App() {
     setIsProcessing(true);
 
     try {
-      // Safeguard: compress photo before storing in state, localStorage, or Supabase
-      const finalPhoto = await compressImageDataUrl(capturedPhoto, 480, 0.72);
+      // Safeguard: compress photo before storing in state, localStorage, or Supabase (~12-18 KB)
+      const finalPhoto = await compressImageDataUrl(capturedPhoto, 380, 0.64);
 
       // Use server-authoritative time (prevents phone clock tampering)
       const now = getServerNow();
@@ -3776,14 +3807,11 @@ export default function App() {
     return filteredRecords.slice(startIndex, endIndex);
   }, [filteredRecords, startIndex, endIndex]);
 
-  // Lazy-load selfie photos on-demand ONLY for currently visible rows / open modals (keeps startup 180x lighter!)
+  // Lazy-load selfie photos on-demand ONLY for visible Admin Log page or opened Receipt/Photo modal (0 KB photo egress on kiosks!)
   useEffect(() => {
     const candidateIds = new Set();
     if (view === 'admin' && adminTab === 'logs') {
       paginatedRecords.forEach(r => { if (r?.id) candidateIds.add(r.id); });
-    }
-    if (showHistoryDrawer) {
-      todayRecords.forEach(r => { if (r?.id) candidateIds.add(r.id); });
     }
     if (selectedRecord?.id) candidateIds.add(selectedRecord.id);
     if (viewingPhoto?.id) candidateIds.add(viewingPhoto.id);
@@ -3799,13 +3827,20 @@ export default function App() {
 
     let cancelled = false;
     (async () => {
-      const photoMap = await fetchAttendancePhotosByIds(missingIds.slice(0, 30));
+      const photoMap = await fetchAttendancePhotosByIds(missingIds.slice(0, 20));
       if (!cancelled && photoMap && Object.keys(photoMap).length > 0) {
-        setLazyPhotoMap(prev => ({ ...prev, ...photoMap }));
+        setLazyPhotoMap(prev => {
+          const next = { ...prev, ...photoMap };
+          try {
+            const entries = Object.entries(next).slice(-40);
+            sessionStorage.setItem('convenio_session_photos', JSON.stringify(Object.fromEntries(entries)));
+          } catch {}
+          return next;
+        });
       }
     })();
     return () => { cancelled = true; };
-  }, [view, adminTab, paginatedRecords, showHistoryDrawer, todayRecords, selectedRecord, viewingPhoto, lazyPhotoMap, records]);
+  }, [view, adminTab, paginatedRecords, selectedRecord, viewingPhoto, lazyPhotoMap, records]);
 
   const totalEmployeesCount = useMemo(() => {
     return branches.reduce((acc, b) => acc + (b.employees ? b.employees.length : 0), 0);
