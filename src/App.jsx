@@ -513,6 +513,7 @@ export default function App() {
   // Typed employee name search & disambiguation input
   const [typedEmpName, setTypedEmpName] = useState('');
   const [formValidationMsg, setFormValidationMsg] = useState('');
+  const [showVisitingQuickList, setShowVisitingQuickList] = useState(false);
 
   // 50-Meter GPS Geofencing & Anti-Proxy Attendance State
   // Status: 'checking' | 'in_range' | 'out_of_range' | 'denied' | 'unavailable'
@@ -1571,7 +1572,12 @@ export default function App() {
       const latest = sorted[0];
       if (!latest || latest.type !== 'in') return;
 
-      const empObj = allCompanyEmployees.find(e => normalizeEmpName(e.name) === empNorm);
+      const latestBranchNorm = normalizeEmpName(latest.branchName);
+      const empObj =
+        allCompanyEmployees.find(
+          e => normalizeEmpName(e.name) === empNorm && normalizeEmpName(e.homeBranchName) === latestBranchNorm
+        ) ||
+        allCompanyEmployees.find(e => normalizeEmpName(e.name) === empNorm);
       if (!empObj) return;
 
       const inBranchName = (latest.branchName || empObj.homeBranchName || 'Other Store').trim();
@@ -2809,13 +2815,23 @@ export default function App() {
       if (info.punches && info.punches.length > 0) {
         const inPunches = info.punches.filter(p => p.type === 'in');
         const outPunches = info.punches.filter(p => p.type === 'out');
+        const inBr = inPunches[0]?.branchName ? inPunches[0].branchName.trim() : '';
+        let outBr = '';
         if (inPunches.length > 0) {
           inTime = formatTo12HourTime(inPunches[0].shortTime || inPunches[0].time);
-          if (inPunches[0].branchName) branch = inPunches[0].branchName;
         }
         if (outPunches.length > 0) {
           const lastOut = outPunches[outPunches.length - 1];
-          outTime = isMissedCheckoutRecord(lastOut) ? 'Missed Out' : formatTo12HourTime(lastOut.shortTime || lastOut.time);
+          const isMissedOut = isMissedCheckoutRecord(lastOut);
+          outTime = isMissedOut ? 'Missed Out' : formatTo12HourTime(lastOut.shortTime || lastOut.time);
+          if (!isMissedOut && lastOut.branchName) {
+            outBr = lastOut.branchName.trim();
+          }
+        }
+        if (inBr && outBr && inBr.toLowerCase() !== outBr.toLowerCase()) {
+          branch = `${inBr} -> ${outBr}`;
+        } else if (inBr || outBr) {
+          branch = inBr || outBr;
         }
       }
 
@@ -4254,33 +4270,47 @@ export default function App() {
                     <ChevronDown className="clean-chevron" size={18} />
                   </div>
 
-                  {/* Quick One-Tap Chips for Staff Who Checked In at Another Store Today */}
+                  {/* Collapsible Quick One-Tap Picker for Staff Who Checked In at Another Store Today */}
                   {visitingCheckedInEmployees.length > 0 && (
                     <div className="visiting-checkin-quickbar">
-                      <div className="visiting-quickbar-header">
-                        <ArrowRightLeft size={13} />
-                        <span>Checked in at another store today? Tap your name to Check Out here:</span>
-                      </div>
-                      <div className="visiting-quickbar-chips">
-                        {visitingCheckedInEmployees.map((vEmp) => {
-                          const isSelected = selectedEmpId === vEmp.id;
-                          return (
-                            <button
-                              key={vEmp.id}
-                              type="button"
-                              className={`visiting-quick-chip ${isSelected ? 'is-selected' : ''}`}
-                              onClick={() => {
-                                setSelectedEmpId(vEmp.id);
-                                setTypedEmpName(vEmp.name);
-                                if (formValidationMsg) setFormValidationMsg('');
-                              }}
-                            >
-                              <span className="vchip-name">{vEmp.name}</span>
-                              <span className="vchip-branch">In: {vEmp.checkedInBranchName}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
+                      <button
+                        type="button"
+                        className="visiting-quickbar-toggle"
+                        onClick={() => setShowVisitingQuickList(prev => !prev)}
+                      >
+                        <div className="visiting-quickbar-header">
+                          <ArrowRightLeft size={13} />
+                          <span>Checked in at another store today? Tap to Check Out here</span>
+                        </div>
+                        <span className="visiting-quickbar-action">
+                          {showVisitingQuickList ? 'Hide' : 'Select Name'}
+                          {showVisitingQuickList ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                        </span>
+                      </button>
+
+                      {showVisitingQuickList && (
+                        <div className="visiting-quickbar-chips">
+                          {visitingCheckedInEmployees.map((vEmp) => {
+                            const isSelected = selectedEmpId === vEmp.id;
+                            return (
+                              <button
+                                key={vEmp.id}
+                                type="button"
+                                className={`visiting-quick-chip ${isSelected ? 'is-selected' : ''}`}
+                                onClick={() => {
+                                  setSelectedEmpId(vEmp.id);
+                                  setTypedEmpName(vEmp.name);
+                                  setShowVisitingQuickList(false);
+                                  if (formValidationMsg) setFormValidationMsg('');
+                                }}
+                              >
+                                <span className="vchip-name">{vEmp.name}</span>
+                                <span className="vchip-branch">In: {vEmp.checkedInBranchName}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
 
