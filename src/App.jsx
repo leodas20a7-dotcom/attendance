@@ -96,6 +96,7 @@ import {
   removeEmployeeFromSupabase, 
   fetchAttendanceFromSupabase, 
   fetchRecentAttendanceFromSupabase,
+  fetchEmployeeRecentAttendanceFromSupabase,
   fetchAttendancePhotosByIds,
   deleteAttendanceIdsFromSupabase,
   saveAttendanceToSupabase,
@@ -1027,27 +1028,44 @@ export default function App() {
         setSupabaseStatus(status);
 
         if (status.tablesReady) {
+          const isAdminView = view === 'admin';
+          let shouldFetchBranches = isAdminView;
+          if (!isAdminView) {
+            try {
+              const lastBrMs = Number(localStorage.getItem('convenio_branches_last_fetch_ms') || 0);
+              shouldFetchBranches = branches.length === 0 || (Date.now() - lastBrMs) > 15 * 60 * 1000;
+            } catch {
+              shouldFetchBranches = true;
+            }
+          }
+
           const [cloudBranches, cloudRecords, cloudManagers, cloudCirculars] = await Promise.all([
-            fetchBranchesFromSupabase(),
-            fetchAttendanceFromSupabase({ includePhotos: false }),
-            fetchManagersFromSupabase(),
+            shouldFetchBranches ? fetchBranchesFromSupabase() : Promise.resolve(null),
+            isAdminView ? fetchAttendanceFromSupabase({ includePhotos: false }) : fetchRecentAttendanceFromSupabase(80),
+            isAdminView ? fetchManagersFromSupabase() : Promise.resolve(null),
             fetchCircularsFromSupabase()
           ]);
 
-          if (cloudBranches && cloudBranches.length > 0) {
-            setBranches(mergeBranchGeoDefaults(cloudBranches));
-          } else {
-            await seedBranchesToSupabase(DEFAULT_BRANCHES);
-            const seeded = await fetchBranchesFromSupabase();
-            if (seeded && seeded.length > 0) {
-              setBranches(mergeBranchGeoDefaults(seeded));
+          if (shouldFetchBranches) {
+            if (cloudBranches && cloudBranches.length > 0) {
+              setBranches(mergeBranchGeoDefaults(cloudBranches));
+              try { localStorage.setItem('convenio_branches_last_fetch_ms', String(Date.now())); } catch {}
+            } else {
+              await seedBranchesToSupabase(DEFAULT_BRANCHES);
+              const seeded = await fetchBranchesFromSupabase();
+              if (seeded && seeded.length > 0) {
+                setBranches(mergeBranchGeoDefaults(seeded));
+                try { localStorage.setItem('convenio_branches_last_fetch_ms', String(Date.now())); } catch {}
+              }
             }
           }
 
           if (cloudRecords !== null) {
             lastCloudRefreshMsRef.current = Date.now();
-            cloudSyncedRef.current = true;
-            const checkedCloud = applyMissedCheckoutsOnFreshCloud(cloudRecords);
+            if (isAdminView) {
+              cloudSyncedRef.current = true;
+            }
+            const checkedCloud = isAdminView ? applyMissedCheckoutsOnFreshCloud(cloudRecords) : cloudRecords;
             setRecords(prev => {
               const merged = mergeAttendanceRecords(checkedCloud, prev);
               safeCacheRecords(merged);
@@ -1096,6 +1114,26 @@ export default function App() {
       clearInterval(pollTimer);
     };
   }, [refreshAttendanceFromCloud]);
+
+  // When switching into Admin Portal from staff kiosk view, lazily load full attendance history, branches, and managers
+  useEffect(() => {
+    if (view !== 'admin') return;
+    if (!cloudSyncedRef.current) {
+      refreshAttendanceFromCloud({ force: true, silent: false, fullHistory: true });
+    }
+    fetchBranchesFromSupabase().then((cloudBranches) => {
+      if (cloudBranches && cloudBranches.length > 0) {
+        setBranches(mergeBranchGeoDefaults(cloudBranches));
+        try { localStorage.setItem('convenio_branches_last_fetch_ms', String(Date.now())); } catch {}
+      }
+    }).catch(() => {});
+    fetchManagersFromSupabase().then((cloudManagers) => {
+      if (cloudManagers && Array.isArray(cloudManagers) && cloudManagers.length > 0) {
+        setManagersList(cloudManagers);
+        saveStoredManagers(cloudManagers);
+      }
+    }).catch(() => {});
+  }, [view, refreshAttendanceFromCloud]);
 
   const copySqlToClipboard = () => {
     navigator.clipboard.writeText(SUPABASE_SCHEMA_SQL);
@@ -1493,13 +1531,13 @@ export default function App() {
     return sorted;
   }, []);
 
-  // Whenever an employee is selected on the attendance form, silently sync today's recent punches from cloud
+  // Whenever an employee is selected on the attendance form, silently sync only that employee's recent punches (~1 KB)
   useEffect(() => {
-    if (!selectedEmpId || view !== 'attendance') return;
+    if (!activeFormEmpName || view !== 'attendance') return;
     let cancelled = false;
     (async () => {
       try {
-        const recent = await fetchRecentAttendanceFromSupabase(120);
+        const recent = await fetchEmployeeRecentAttendanceFromSupabase(activeFormEmpName, 6);
         if (!cancelled && recent !== null) {
           setRecords(prev => mergeAttendanceRecords(
             [
@@ -1512,7 +1550,7 @@ export default function App() {
       } catch {}
     })();
     return () => { cancelled = true; };
-  }, [selectedEmpId, view, mergeAttendanceRecords]);
+  }, [activeFormEmpName, view, mergeAttendanceRecords]);
 
   // Memoized Today's Check Ins count
   const todayCheckInsCount = useMemo(() => {
@@ -3247,12 +3285,12 @@ export default function App() {
     const empNorm = normalizeEmpName(empName);
     let effectiveRecords = records;
 
-    // Live verify against Supabase (< 3 KB) whenever checking out without a local Check-In
+    // Live verify against Supabase (~1 KB) whenever checking out without a local Check-In
     // or checking in when local state looks blocked, so stale PWA cache / cross-device punches never block checkout!
     if ((actionType === 'out' && latestTodayRecord?.type !== 'in') || actionType === 'in') {
       setIsVerifyingAction(true);
       try {
-        const recent = await fetchRecentAttendanceFromSupabase(120);
+        const recent = await fetchEmployeeRecentAttendanceFromSupabase(empName, 6);
         if (recent !== null) {
           effectiveRecords = mergeAttendanceRecords(
             [

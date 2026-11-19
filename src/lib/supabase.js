@@ -374,6 +374,28 @@ export async function fetchRecentAttendanceFromSupabase(limitCount = 120) {
 }
 
 /**
+ * Ultra-low-egress live query for a single employee's latest punches (~1 KB, no photos)
+ */
+export async function fetchEmployeeRecentAttendanceFromSupabase(employeeName, limitCount = 6) {
+  const cleanName = String(employeeName || '').trim();
+  if (!cleanName) return null;
+  try {
+    const { data, error } = await supabase
+      .from('attendance_records')
+      .select(LIGHTWEIGHT_ATTENDANCE_COLUMNS)
+      .ilike('employee_name', cleanName)
+      .order('created_at', { ascending: false })
+      .limit(limitCount);
+
+    if (error || !data) return null;
+    return data.map(mapAttendanceRow);
+  } catch (err) {
+    console.warn('Error fetching employee recent attendance:', err);
+    return null;
+  }
+}
+
+/**
  * Lazy-load Base64 selfie photos on-demand for visible log rows or receipt modal
  */
 export async function fetchAttendancePhotosByIds(ids = []) {
