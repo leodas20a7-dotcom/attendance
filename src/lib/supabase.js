@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
-export const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://ykdhjkzrprafzivvguhh.supabase.co';
-export const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlrZGhqa3pycHJhZnppdnZndWhoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEzNjk2OTYsImV4cCI6MjEwNjk0NTY5Nn0.EgQv8vIGqBzlHZJuGTQi3Ej8TPfmrgasAmXsKU7pNuM';
+export const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://lynbfisttvkswrqsnihi.supabase.co';
+export const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx5bmJmaXN0dHZrc3dycXNuaWhpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTUwNjg3MjQsImV4cCI6MjExMDY0NDcyNH0.Ezo5VtwDrXomTolwlS5q6As40oqQob3E2fMXZ9aO1c0';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS public.device_telemetry (
   device_summary TEXT,
   platform TEXT,
   is_standalone BOOLEAN DEFAULT false,
+  is_latest BOOLEAN DEFAULT true,
   action TEXT DEFAULT 'launch',
   last_seen_date TEXT,
   last_seen_time TEXT,

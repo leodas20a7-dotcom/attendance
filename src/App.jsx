@@ -7787,7 +7787,7 @@ export default function App() {
 
               <div className="sql-modal-actions">
                 <a 
-                  href="https://supabase.com/dashboard/project/ykdhjkzrprafzivvguhh/sql/new" 
+                  href="https://supabase.com/dashboard/project/lynbfisttvkswrqsnihi/sql/new" 
                   target="_blank" 
                   rel="noreferrer" 
                   className="btn-open-sql-editor"
