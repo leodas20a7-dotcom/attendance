@@ -11126,3 +11126,113 @@ th.th-missed {
 .version-close-btn:hover {
   background: #1e293b;
 }
+
+/* ================= CROSS-STORE VISITING STAFF QUICK CHECK-OUT & PAYROLL TRANSFER BADGES ================= */
+.visiting-checkin-quickbar {
+  margin-top: 0.45rem;
+  background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  padding: 0.65rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.visiting-quickbar-header {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #1e40af;
+}
+
+.visiting-quickbar-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.visiting-quick-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: #ffffff;
+  border: 1px solid #93c5fd;
+  border-radius: 999px;
+  padding: 0.32rem 0.7rem;
+  font-family: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: all 0.16s ease;
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.06);
+}
+
+.visiting-quick-chip:hover {
+  background: #eff6ff;
+  border-color: #3b82f6;
+  transform: translateY(-1px);
+}
+
+.visiting-quick-chip.is-selected {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #ffffff;
+}
+
+.vchip-name {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.visiting-quick-chip.is-selected .vchip-name {
+  color: #ffffff;
+}
+
+.vchip-branch {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #2563eb;
+  background: #dbeafe;
+  padding: 0.1rem 0.42rem;
+  border-radius: 999px;
+}
+
+.visiting-quick-chip.is-selected .vchip-branch {
+  color: #1e3a8a;
+  background: #ffffff;
+}
+
+.status-cross-branch-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #1d4ed8;
+  background: #dbeafe;
+  border: 1px solid #93c5fd;
+  padding: 0.14rem 0.5rem;
+  border-radius: 999px;
+}
+
+.payroll-emp-name-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+
+.payroll-cross-store-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #1d4ed8;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  width: fit-content;
+}
