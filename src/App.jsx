@@ -513,7 +513,6 @@ export default function App() {
   // Typed employee name search & disambiguation input
   const [typedEmpName, setTypedEmpName] = useState('');
   const [formValidationMsg, setFormValidationMsg] = useState('');
-  const [showVisitingQuickList, setShowVisitingQuickList] = useState(false);
 
   // 50-Meter GPS Geofencing & Anti-Proxy Attendance State
   // Status: 'checking' | 'in_range' | 'out_of_range' | 'denied' | 'unavailable'
@@ -1552,57 +1551,6 @@ export default function App() {
     });
     return cleanList.sort((a, b) => getRecordSortMs(b) - getRecordSortMs(a));
   }, [records, isRecordToday, sanitizeDayPunches]);
-
-  // Employees who checked in today at another store and are currently active (not yet checked out)
-  // Makes 2nd-half cross-store Check-Out one-tap effortless without searching or typing
-  const visitingCheckedInEmployees = useMemo(() => {
-    const curBranchNorm = (currentFormBranch?.name || '').trim().toLowerCase();
-    const byEmp = new Map();
-    todayRecords.forEach(r => {
-      if (isMissedCheckoutRecordUtil(r)) return;
-      const k = normalizeEmpName(r.employeeName || r.name);
-      if (!k) return;
-      if (!byEmp.has(k)) byEmp.set(k, []);
-      byEmp.get(k).push(r);
-    });
-
-    const list = [];
-    byEmp.forEach((punches, empNorm) => {
-      const sorted = [...punches].sort((a, b) => getRecordSortMs(b) - getRecordSortMs(a));
-      const latest = sorted[0];
-      if (!latest || latest.type !== 'in') return;
-
-      const latestBranchNorm = normalizeEmpName(latest.branchName);
-      const empObj =
-        allCompanyEmployees.find(
-          e => normalizeEmpName(e.name) === empNorm && normalizeEmpName(e.homeBranchName) === latestBranchNorm
-        ) ||
-        allCompanyEmployees.find(e => normalizeEmpName(e.name) === empNorm);
-      if (!empObj) return;
-
-      const inBranchName = (latest.branchName || empObj.homeBranchName || 'Other Store').trim();
-      const isFromOtherStore = !currentBranchEmployees.some(e => e.id === empObj.id) ||
-        (curBranchNorm && inBranchName.toLowerCase() !== curBranchNorm);
-
-      if (isFromOtherStore) {
-        list.push({
-          ...empObj,
-          checkedInBranchName: inBranchName,
-          checkedInTime: formatTo12HourTime(latest.shortTime || latest.time)
-        });
-      }
-    });
-
-    return list.sort((a, b) => a.name.localeCompare(b.name));
-  }, [todayRecords, allCompanyEmployees, currentBranchEmployees, currentFormBranch]);
-
-  // Registered employees from other branches (for easy selection in dropdown when visiting in 2nd half)
-  const otherBranchEmployees = useMemo(() => {
-    const localIds = new Set(currentBranchEmployees.map(e => e.id));
-    return allCompanyEmployees
-      .filter(e => !localIds.has(e.id))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [allCompanyEmployees, currentBranchEmployees]);
 
   // List of distinct staff members who punched today with their counts (normalized so extra spaces don't duplicate)
   const todayStaffList = useMemo(() => {
@@ -4217,10 +4165,9 @@ export default function App() {
                 <div className="clean-field">
                   <div className="clean-field-header">
                     <label htmlFor="employee-select" className="clean-label">Employee Name</label>
-                    <span className="clean-label-hint">Select from roster or type 2+ letters below</span>
                   </div>
 
-                  {/* 1. Dropdown Selection (Includes Current Store + Visiting / Other Store Staff) */}
+                  {/* 1. Dropdown Selection (Crisp list of this store's staff) */}
                   <div className="clean-select-wrapper">
                     <select
                       id="employee-select"
@@ -4237,87 +4184,25 @@ export default function App() {
                       }}
                     >
                       <option value="" disabled>Select Your Name</option>
-                      <optgroup label={`${currentFormBranch?.name || 'This Store'} Staff`}>
-                        {currentBranchEmployees.map((emp) => (
-                          <option key={emp.id} value={emp.id}>
-                            {emp.name}
-                          </option>
-                        ))}
-                      </optgroup>
-                      {visitingCheckedInEmployees.some(v => !currentBranchEmployees.some(e => e.id === v.id)) && (
-                        <optgroup label="Checked In Today at Other Store (Ready to Check Out)">
-                          {visitingCheckedInEmployees
-                            .filter(v => !currentBranchEmployees.some(e => e.id === v.id))
-                            .map((emp) => (
-                              <option key={emp.id} value={emp.id}>
-                                {emp.name} (In: {emp.checkedInBranchName})
-                              </option>
-                            ))}
-                        </optgroup>
-                      )}
-                      {otherBranchEmployees.length > 0 && (
-                        <optgroup label="Other Store Staff (Visiting / 2nd Half)">
-                          {otherBranchEmployees
-                            .filter(emp => !visitingCheckedInEmployees.some(v => v.id === emp.id))
-                            .map((emp) => (
-                              <option key={emp.id} value={emp.id}>
-                                {emp.name} ({emp.homeBranchName})
-                              </option>
-                            ))}
-                        </optgroup>
+                      {currentBranchEmployees.map((emp) => (
+                        <option key={emp.id} value={emp.id}>
+                          {emp.name}
+                        </option>
+                      ))}
+                      {/* If a visiting employee from another branch is selected via quick-pick or search, display cleanly */}
+                      {currentFormEmployee && !currentBranchEmployees.some(e => e.id === currentFormEmployee.id) && (
+                        <option key={currentFormEmployee.id} value={currentFormEmployee.id}>
+                          {currentFormEmployee.name}
+                        </option>
                       )}
                     </select>
                     <ChevronDown className="clean-chevron" size={18} />
                   </div>
 
-                  {/* Collapsible Quick One-Tap Picker for Staff Who Checked In at Another Store Today */}
-                  {visitingCheckedInEmployees.length > 0 && (
-                    <div className="visiting-checkin-quickbar">
-                      <button
-                        type="button"
-                        className="visiting-quickbar-toggle"
-                        onClick={() => setShowVisitingQuickList(prev => !prev)}
-                      >
-                        <div className="visiting-quickbar-header">
-                          <ArrowRightLeft size={13} />
-                          <span>Checked in at another store today? Tap to Check Out here</span>
-                        </div>
-                        <span className="visiting-quickbar-action">
-                          {showVisitingQuickList ? 'Hide' : 'Select Name'}
-                          {showVisitingQuickList ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                        </span>
-                      </button>
-
-                      {showVisitingQuickList && (
-                        <div className="visiting-quickbar-chips">
-                          {visitingCheckedInEmployees.map((vEmp) => {
-                            const isSelected = selectedEmpId === vEmp.id;
-                            return (
-                              <button
-                                key={vEmp.id}
-                                type="button"
-                                className={`visiting-quick-chip ${isSelected ? 'is-selected' : ''}`}
-                                onClick={() => {
-                                  setSelectedEmpId(vEmp.id);
-                                  setTypedEmpName(vEmp.name);
-                                  setShowVisitingQuickList(false);
-                                  if (formValidationMsg) setFormValidationMsg('');
-                                }}
-                              >
-                                <span className="vchip-name">{vEmp.name}</span>
-                                <span className="vchip-branch">In: {vEmp.checkedInBranchName}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
                   {/* Divider */}
                   <div className="emp-or-divider">
                     <span className="emp-or-line"></span>
-                    <span className="emp-or-text">OR TYPE YOUR NAME BELOW (ALL STORES)</span>
+                    <span className="emp-or-text">OTHER STORE? SEARCH NAME</span>
                     <span className="emp-or-line"></span>
                   </div>
 
@@ -4328,7 +4213,7 @@ export default function App() {
                       <input
                         type="text"
                         id="employee-name-type-input"
-                        placeholder="Type your name (2+ letters)..."
+                        placeholder="Type your name..."
                         value={typedEmpName}
                         onChange={(e) => handleTypedNameChange(e.target.value)}
                         className={`clean-input emp-type-input ${
@@ -4417,32 +4302,28 @@ export default function App() {
                           <div className="status-primary-line">
                             {latestTodayRecord?.type === 'in' ? (
                               <>
-                                <strong className="status-title-in">{activeFormEmpName}: Checked In Today</strong>
+                                <strong className="status-title-in">{activeFormEmpName} • Checked In</strong>
                                 <span className="status-time-chip">{formatTo12HourTime(latestTodayRecord.shortTime || latestTodayRecord.time)}</span>
                                 {isCrossStoreShift && (
                                   <span className="status-cross-branch-chip">
-                                    In at {latestTodayRecord.branchName}
+                                    In: {latestTodayRecord.branchName}
                                   </span>
                                 )}
                               </>
                             ) : latestTodayRecord?.type === 'out' ? (
                               <>
-                                <strong className="status-title-out">{activeFormEmpName}: Checked Out Today</strong>
+                                <strong className="status-title-out">{activeFormEmpName} • Checked Out</strong>
                                 <span className="status-time-chip">{formatTo12HourTime(latestTodayRecord.shortTime || latestTodayRecord.time)}</span>
                               </>
                             ) : (
-                              <strong className="status-title-none">{activeFormEmpName}: Not Checked In Today</strong>
+                              <strong className="status-title-none">{activeFormEmpName} • Not Checked In</strong>
                             )}
                           </div>
-                          <p className="status-subtext">
-                            {latestTodayRecord?.type === 'in' 
-                              ? (isCrossStoreShift
-                                  ? `Checked in at ${latestTodayRecord.branchName} • Ready to Check Out here at ${currentFormBranch.name}`
-                                  : 'Shift active • Tap Check Out when your shift ends')
-                              : latestTodayRecord?.type === 'out'
-                              ? 'Shift complete • Ready if starting a new shift'
-                              : 'Tap Check In to begin today\'s shift'}
-                          </p>
+                          {isCrossStoreShift && (
+                            <p className="status-subtext">
+                              Ready to Check Out here at {currentFormBranch.name}
+                            </p>
+                          )}
                         </div>
                       </div>
 
@@ -4456,8 +4337,8 @@ export default function App() {
                             </span>
                             <span className={`shift-target-badge ${shiftMetrics.isTargetMet ? 'target-met' : 'target-pending'}`}>
                               {shiftMetrics.isTargetMet 
-                                ? '✓ 9h Target Met' 
-                                : `${shiftMetrics.remainingLabel} left for 9h`}
+                                ? '✓ 9h Met' 
+                                : `${shiftMetrics.remainingLabel} left`}
                             </span>
                           </div>
                           <div className="shift-progress-track">

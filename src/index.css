@@ -618,10 +618,11 @@ body {
 
 /* ================= SMART STATUS BANNER ================= */
 .smart-status-banner {
-  border-radius: 14px;
-  padding: 0.75rem 0.95rem;
+  border-radius: 12px;
+  padding: 0.7rem 0.9rem;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   transition: all 0.25s ease;
   animation: bannerFadeIn 0.22s ease-out;
 }
@@ -11129,21 +11130,21 @@ th.th-missed {
 
 /* ================= CROSS-STORE VISITING STAFF QUICK CHECK-OUT & PAYROLL TRANSFER BADGES ================= */
 .visiting-checkin-quickbar {
-  margin-top: 0.45rem;
-  background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
-  border: 1px solid #bfdbfe;
-  border-radius: 12px;
-  padding: 0.5rem 0.7rem;
+  margin-top: 0.4rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.45rem 0.65rem;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.45rem;
 }
 
 .visiting-quickbar-toggle {
   width: 100%;
   background: transparent;
   border: none;
-  padding: 0.1rem 0;
+  padding: 0.05rem 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -11156,10 +11157,10 @@ th.th-missed {
 .visiting-quickbar-header {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  font-size: 0.76rem;
-  font-weight: 700;
-  color: #1e40af;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #334155;
 }
 
 .visiting-quickbar-action {
@@ -11168,9 +11169,9 @@ th.th-missed {
   gap: 0.2rem;
   font-size: 0.72rem;
   font-weight: 700;
-  color: #1d4ed8;
-  background: #dbeafe;
-  padding: 0.16rem 0.5rem;
+  color: #1e293b;
+  background: #e2e8f0;
+  padding: 0.18rem 0.55rem;
   border-radius: 999px;
   flex-shrink: 0;
 }
