@@ -70,6 +70,7 @@ import {
 
 import { 
   DEFAULT_BRANCHES,
+  mergeBranchGeoDefaults,
   getStoredBranches, 
   saveStoredBranches, 
   getStoredAdminLogs,
@@ -1034,12 +1035,12 @@ export default function App() {
           ]);
 
           if (cloudBranches && cloudBranches.length > 0) {
-            setBranches(cloudBranches);
+            setBranches(mergeBranchGeoDefaults(cloudBranches));
           } else {
             await seedBranchesToSupabase(DEFAULT_BRANCHES);
             const seeded = await fetchBranchesFromSupabase();
             if (seeded && seeded.length > 0) {
-              setBranches(seeded);
+              setBranches(mergeBranchGeoDefaults(seeded));
             }
           }
 

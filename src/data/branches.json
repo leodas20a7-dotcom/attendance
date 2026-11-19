@@ -102,5 +102,18 @@
     "lng": 80.211263,
     "geofenceRadiusMeters": 60,
     "geoLocation": "https://maps.app.goo.gl/57nxBv38FPiXsG3u8?g_st=awb"
+  },
+  {
+    "sNo": 9,
+    "id": "branch-1794991784079",
+    "shopName": "Convenio Mart",
+    "apartmentName": "Prestige Courtyards",
+    "location": "Sholinganallur",
+    "pincode": "600119",
+    "address": "Prestige Courtyards, Sholinganallur, Chennai, Tamil Nadu 600119",
+    "lat": 12.889639,
+    "lng": 80.219781,
+    "geofenceRadiusMeters": 50,
+    "geoLocation": "https://www.google.com/maps?q=12.889639,80.219781"
   }
 ]

@@ -134,6 +134,18 @@ export const DEFAULT_BRANCHES = [
     employees: [
       { id: 'emp-tudoor-1', name: 'Adhithiyan' }
     ]
+  },
+  {
+    id: 'branch-1794991784079',
+    name: 'Prestige Courtyards',
+    code: 'CM-10',
+    location: 'Sholinganallur',
+    pincode: '600119',
+    address: 'Prestige Courtyards, Sholinganallur, Chennai, Tamil Nadu 600119',
+    lat: 12.889639,
+    lng: 80.219781,
+    geofenceRadiusMeters: 50,
+    employees: []
   }
 ];
 
@@ -230,6 +242,33 @@ export function saveStoredAdminLogs(logs) {
   }
 }
 
+/**
+ * Merge authoritative GPS coordinates & geofence radius from DEFAULT_BRANCHES
+ * onto any branch list (e.g. localStorage cache or Supabase fetch).
+ */
+export function mergeBranchGeoDefaults(branchList) {
+  if (!Array.isArray(branchList)) return DEFAULT_BRANCHES;
+  return branchList
+    .filter(b => b && b.id !== 'branch-dummy-test')
+    .map(branch => {
+      const match = DEFAULT_BRANCHES.find(
+        d => d.id === branch.id || d.name.toLowerCase() === (branch.name || '').trim().toLowerCase()
+      );
+      if (match) {
+        return {
+          ...branch,
+          lat: match.lat,
+          lng: match.lng,
+          geofenceRadiusMeters: match.geofenceRadiusMeters || 50,
+          location: branch.location || match.location,
+          address: (!branch.address || branch.address === 'Convenio Mart Branch') ? match.address : branch.address,
+          pincode: branch.pincode || match.pincode
+        };
+      }
+      return branch;
+    });
+}
+
 export function getStoredBranches() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_BRANCHES);
@@ -238,7 +277,6 @@ export function getStoredBranches() {
       return DEFAULT_BRANCHES;
     }
     const parsed = JSON.parse(raw);
-    // If old mock data from previous version exists, automatically upgrade to new Casagrand branches
     if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.name === 'MG Road Flagship') {
       localStorage.setItem(STORAGE_KEY_BRANCHES, JSON.stringify(DEFAULT_BRANCHES));
       localStorage.removeItem(STORAGE_KEY_SELECTED_BRANCH);
@@ -246,23 +284,13 @@ export function getStoredBranches() {
       return DEFAULT_BRANCHES;
     }
     if (Array.isArray(parsed) && parsed.length > 0) {
-      // Purge any temporary dummy test branches if present in cache
-      const nonDummy = parsed.filter(b => b.id !== 'branch-dummy-test');
-      // Merge latest lat/lng and geofence info to keep coordinates updated
-      const updated = nonDummy.map(branch => {
-        const match = DEFAULT_BRANCHES.find(d => d.id === branch.id || d.name.toLowerCase() === branch.name?.toLowerCase());
-        if (match) {
-          return {
-            ...branch,
-            lat: match.lat,
-            lng: match.lng,
-            geofenceRadiusMeters: match.geofenceRadiusMeters || 50,
-            location: branch.location || match.location,
-            address: branch.address || match.address,
-            pincode: branch.pincode || match.pincode
-          };
-        }
-        return branch;
+      const updated = mergeBranchGeoDefaults(parsed);
+      // Append any newly configured DEFAULT_BRANCHES not yet present in cache
+      DEFAULT_BRANCHES.forEach(def => {
+        const exists = updated.some(
+          b => b.id === def.id || (b.name || '').trim().toLowerCase() === def.name.toLowerCase()
+        );
+        if (!exists) updated.push(def);
       });
       localStorage.setItem(STORAGE_KEY_BRANCHES, JSON.stringify(updated));
       return updated;
